@@ -2,14 +2,15 @@ import UIKit
 import SwiftUI
 
 /// Internal controller that owns the camera session and the bubble view. The bubble
-/// is attached directly to the host app's key UIWindow so that ReplayKit's screen
-/// capture composite always includes it.
+/// lives in a dedicated UIWindow at `.alert + 1` so it floats above modal sheets and
+/// other host UI, while still being part of the scene's screen-capture composite.
 final class OverlayController {
 
     let settingsStore = SettingsStore()
 
     private let cameraSession = CameraSession()
     private weak var hostWindow: UIWindow?
+    private var overlayWindow: PassthroughWindow?
     private var bubble: BubbleView?
 
     init() {
@@ -32,18 +33,25 @@ final class OverlayController {
             return
         }
 
-        guard let window = keyWindow() else { return }
+        guard let scene = activeWindowScene() else { return }
+        hostWindow = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first
+
+        let window = PassthroughWindow(windowScene: scene)
+        window.windowLevel = .alert + 1
+        window.backgroundColor = .clear
+        let root = PassthroughRootViewController()
+        window.rootViewController = root
+        window.isHidden = false
 
         let bubble = BubbleView(session: cameraSession.session, settings: settingsStore)
         bubble.onRequestSettings = { [weak self] in
             guard let self, let top = self.topViewController() else { return }
             self.presentSettings(from: top)
         }
-        // Adding as a direct subview of the window keeps it above the host app's
-        // rootViewController content and inside the recorded scene composite.
-        window.addSubview(bubble)
+        root.view.addSubview(bubble)
+
         self.bubble = bubble
-        self.hostWindow = window
+        self.overlayWindow = window
 
         cameraSession.start()
     }
@@ -52,6 +60,8 @@ final class OverlayController {
         cameraSession.stop()
         bubble?.removeFromSuperview()
         bubble = nil
+        overlayWindow?.isHidden = true
+        overlayWindow = nil
         hostWindow = nil
     }
 
@@ -85,14 +95,35 @@ final class OverlayController {
             ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
     }
 
-    private func keyWindow() -> UIWindow? {
-        guard let scene = activeWindowScene() else { return nil }
-        return scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first
-    }
-
     private func topViewController() -> UIViewController? {
         var top = hostWindow?.rootViewController
         while let presented = top?.presentedViewController { top = presented }
         return top
     }
+}
+
+/// Window that forwards touches outside its bubble content to the host app's windows.
+/// Keeping the window at `.alert + 1` parks the bubble above modally-presented sheets.
+final class PassthroughWindow: UIWindow {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard let hit = super.hitTest(point, with: event) else { return nil }
+        // The root VC's view is our transparent canvas — if the user tapped it, the
+        // tap was not on the bubble, so let it fall through to host windows below.
+        if hit === rootViewController?.view { return nil }
+        return hit
+    }
+}
+
+/// Transparent root that does not assume status-bar/appearance ownership away from
+/// the host app.
+final class PassthroughRootViewController: UIViewController {
+    override func loadView() {
+        let v = UIView()
+        v.backgroundColor = .clear
+        view = v
+    }
+    override var childForStatusBarStyle: UIViewController? { nil }
+    override var childForStatusBarHidden: UIViewController? { nil }
+    override var childForHomeIndicatorAutoHidden: UIViewController? { nil }
+    override var childForScreenEdgesDeferringSystemGestures: UIViewController? { nil }
 }
