@@ -80,9 +80,12 @@ final class ThumbnailStripRenderer {
             UIColor.black.setFill()
             ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
             var x: CGFloat = 0
+            // UIGraphicsImageRenderer's CGContext is flipped for UIKit (Y-down).
+            // CGContext.draw on a CGImage renders upside-down in that space —
+            // UIImage.draw(in:) compensates for the flip.
             for frame in frames {
                 let rect = CGRect(x: x, y: 0, width: thumbnailSize.width, height: thumbnailSize.height)
-                ctx.cgContext.draw(frame, in: rect)
+                UIImage(cgImage: frame).draw(in: rect)
                 x += thumbnailSize.width
             }
         }
