@@ -35,6 +35,11 @@ public final class EditorViewController: UIViewController {
     let timelineView = TimelineView()
     let inspector = ClipInspectorView()
 
+    /// Height constraint that collapses the inspector to 0pt when no clip is
+    /// selected. The inspector's normal intrinsic height (driven by its
+    /// internal UIStackView) applies whenever this constraint is inactive.
+    private var inspectorCollapsedHeight: NSLayoutConstraint!
+
     // MARK: - State
 
     private var cancellables: Set<AnyCancellable> = []
@@ -168,6 +173,9 @@ public final class EditorViewController: UIViewController {
         view.addSubview(timelineView)
 
         inspector.isHidden = true
+        inspector.translatesAutoresizingMaskIntoConstraints = false
+        inspectorCollapsedHeight = inspector.heightAnchor.constraint(equalToConstant: 0)
+        inspectorCollapsedHeight.isActive = true
         inspector.onSpeedCommit = { [weak self] speed in
             self?.commitSpeed(speed)
         }
@@ -315,12 +323,16 @@ public final class EditorViewController: UIViewController {
         guard let clipID,
               let loc = editStore.timeline.locate(clipID: clipID) else {
             inspector.isHidden = true
+            inspectorCollapsedHeight.isActive = true
+            view.layoutIfNeeded()
             return
         }
         let track = editStore.timeline.tracks[loc.trackIndex]
         let clip = track.clips[loc.clipIndex]
         inspector.configure(with: clip, trackKind: track.kind)
         inspector.isHidden = false
+        inspectorCollapsedHeight.isActive = false
+        view.layoutIfNeeded()
     }
 
     // MARK: - Trim drag

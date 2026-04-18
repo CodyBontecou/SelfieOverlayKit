@@ -10,7 +10,13 @@ final class TimelineView: UIView {
     // MARK: - Layout constants
 
     static let rulerHeight: CGFloat = 22
-    static let trackHeight: CGFloat = 40
+    /// Minimum track lane height. Used as a floor; tracks expand beyond this
+    /// when there's vertical space available in the timeline container.
+    static let minTrackHeight: CGFloat = 44
+    /// Upper bound so a single-track timeline doesn't blow up into a giant
+    /// lane on tall screens. Two- or three-track layouts will usually hit
+    /// this ceiling before they saturate a Pro Max display.
+    static let maxTrackHeight: CGFloat = 120
     static let trackSpacing: CGFloat = 6
 
     // MARK: - Tunables
@@ -125,8 +131,10 @@ final class TimelineView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         let contentWidth = max(bounds.width, CGFloat(timeline.duration.seconds) * pixelsPerSecond)
-        let contentHeight = Self.rulerHeight +
-            CGFloat(timeline.tracks.count) * (Self.trackHeight + Self.trackSpacing)
+        let trackH = computedTrackHeight()
+        let trackCount = CGFloat(max(1, timeline.tracks.count))
+        let spacingTotal = CGFloat(max(0, timeline.tracks.count - 1)) * Self.trackSpacing
+        let contentHeight = Self.rulerHeight + trackCount * trackH + spacingTotal
 
         scrollView.contentSize = CGSize(width: contentWidth, height: contentHeight)
         contentView.frame = CGRect(x: 0, y: 0, width: contentWidth, height: contentHeight)
@@ -137,12 +145,23 @@ final class TimelineView: UIView {
         var y = Self.rulerHeight
         for track in timeline.tracks {
             guard let row = trackRowViews[track.id] else { continue }
-            row.frame = CGRect(x: 0, y: y, width: contentWidth, height: Self.trackHeight)
-            y += Self.trackHeight + Self.trackSpacing
+            row.frame = CGRect(x: 0, y: y, width: contentWidth, height: trackH)
+            y += trackH + Self.trackSpacing
         }
 
         setPlayhead(CMTime(seconds: Double(playheadView.frame.origin.x + 1) / pixelsPerSecond,
                            preferredTimescale: 600))
+    }
+
+    /// Track lanes grow to fill the timeline container's height, clamped to
+    /// `[minTrackHeight, maxTrackHeight]`. Keeps thumbnails / waveforms
+    /// legible on tall screens without leaving dead whitespace.
+    private func computedTrackHeight() -> CGFloat {
+        let count = max(1, timeline.tracks.count)
+        let spacing = CGFloat(max(0, count - 1)) * Self.trackSpacing
+        let available = bounds.height - Self.rulerHeight - spacing
+        let fitted = available / CGFloat(count)
+        return min(Self.maxTrackHeight, max(Self.minTrackHeight, fitted))
     }
 
     // MARK: - Internals
