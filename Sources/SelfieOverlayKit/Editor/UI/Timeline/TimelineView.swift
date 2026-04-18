@@ -85,6 +85,14 @@ final class TimelineView: UIView {
         contentView.addSubview(rulerView)
         contentView.addSubview(playheadView)
 
+        // Tap on bare track-area background deselects the current clip. Per-
+        // clip taps still fire their own gesture recognizers attached to the
+        // ClipViews and take precedence because they're hit-tested first.
+        let deselectTap = UITapGestureRecognizer(
+            target: self, action: #selector(handleBackgroundTap(_:)))
+        deselectTap.cancelsTouchesInView = false
+        contentView.addGestureRecognizer(deselectTap)
+
         let rulerTap = UITapGestureRecognizer(target: self, action: #selector(handleRulerTap(_:)))
         rulerView.addGestureRecognizer(rulerTap)
         let rulerPan = UIPanGestureRecognizer(target: self, action: #selector(handleRulerPan(_:)))
@@ -206,6 +214,22 @@ final class TimelineView: UIView {
             pixelsPerSecond = pixelsPerSecond * gesture.scale
             gesture.scale = 1
         }
+    }
+
+    @objc private func handleBackgroundTap(_ gesture: UITapGestureRecognizer) {
+        guard selectedClipID != nil else { return }
+        // If the tap hit a ClipView, the clip's own tap recognizer handles it
+        // and this fires as well — so verify the hit was on bare background.
+        let point = gesture.location(in: contentView)
+        for row in trackRowViews.values where row.frame.contains(point) {
+            let local = gesture.location(in: row)
+            for clipView in row.subviews.compactMap({ $0 as? ClipView }) {
+                if clipView.frame.contains(local) { return }
+            }
+        }
+        selectedClipID = nil
+        setSelectedClipID(nil)
+        onClipSelected?(nil)
     }
 
     @objc private func handleRulerTap(_ gesture: UITapGestureRecognizer) {

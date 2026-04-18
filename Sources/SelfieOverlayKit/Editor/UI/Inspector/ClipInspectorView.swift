@@ -54,6 +54,19 @@ final class ClipInspectorView: UIView {
 
     var onVolumeCommit: ((Float) -> Void)?
 
+    // MARK: - Close
+
+    let closeButton: UIButton = {
+        let b = UIButton(type: .system)
+        b.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
+        b.tintColor = .tertiaryLabel
+        b.accessibilityLabel = "Close inspector"
+        b.accessibilityIdentifier = "inspector.close"
+        return b
+    }()
+
+    var onClose: (() -> Void)?
+
     /// Fires while the slider is being dragged (for live label updates).
     var onSpeedChanging: ((Double) -> Void)?
 
@@ -106,10 +119,21 @@ final class ClipInspectorView: UIView {
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
 
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.addTarget(self, action: #selector(didTapClose), for: .touchUpInside)
+        addSubview(closeButton)
+
         NSLayoutConstraint.activate([
+            closeButton.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            closeButton.widthAnchor.constraint(equalToConstant: 28),
+            closeButton.heightAnchor.constraint(equalToConstant: 28),
+
             stack.topAnchor.constraint(equalTo: topAnchor, constant: 12),
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            // Leave room for the close button so slider value labels
+            // ("1.00×", "100%") don't slide under it.
+            stack.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -8),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12)
         ])
 
@@ -117,6 +141,10 @@ final class ClipInspectorView: UIView {
         speedSlider.addTarget(self, action: #selector(speedSliderReleased), for: [.touchUpInside, .touchUpOutside])
         volumeSlider.addTarget(self, action: #selector(volumeSliderChanged), for: .valueChanged)
         volumeSlider.addTarget(self, action: #selector(volumeSliderReleased), for: [.touchUpInside, .touchUpOutside])
+    }
+
+    @objc private func didTapClose() {
+        onClose?()
     }
 
     // MARK: - Public API

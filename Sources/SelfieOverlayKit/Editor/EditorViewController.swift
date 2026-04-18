@@ -182,6 +182,9 @@ public final class EditorViewController: UIViewController {
         inspector.onVolumeCommit = { [weak self] volume in
             self?.commitVolume(volume)
         }
+        inspector.onClose = { [weak self] in
+            self?.deselectClip()
+        }
         view.addSubview(inspector)
 
         NSLayoutConstraint.activate([
@@ -318,6 +321,14 @@ public final class EditorViewController: UIViewController {
     }
 
     // MARK: - Inspector binding
+
+    /// Drops the current selection and hides the inspector. Wired to the
+    /// inspector's close button and to empty-area taps in the timeline.
+    func deselectClip() {
+        timelineView.setSelectedClipID(nil)
+        updateSplitButtonEnabled()
+        updateInspector(for: nil)
+    }
 
     func updateInspector(for clipID: UUID?) {
         guard let clipID,
