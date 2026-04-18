@@ -55,9 +55,15 @@ public struct Timeline: Hashable {
         var clip = copy.tracks[loc.trackIndex].clips[loc.clipIndex]
         // Hold timelineRange.start fixed; scale timelineRange.duration to the
         // new speed so paired audio / video tracks can be re-timed in lockstep.
+        // Round to the source timescale — CMTimeMultiplyByFloat64 returns a
+        // ns-scale time that AVMutableCompositionTrack.scaleTimeRange does
+        // not align well with, leading to hangs on simulator.
         let newTimelineDuration = CMTimeMultiplyByFloat64(clip.sourceRange.duration, multiplier: 1.0 / speed)
+        let rounded = CMTimeConvertScale(newTimelineDuration,
+                                         timescale: clip.sourceRange.duration.timescale,
+                                         method: .default)
         clip.speed = speed
-        clip.timelineRange = CMTimeRange(start: clip.timelineRange.start, duration: newTimelineDuration)
+        clip.timelineRange = CMTimeRange(start: clip.timelineRange.start, duration: rounded)
         copy.tracks[loc.trackIndex].clips[loc.clipIndex] = clip
         return copy
     }
@@ -77,7 +83,10 @@ public struct Timeline: Hashable {
         guard let loc = locate(clipID: clipID) else { return self }
         var copy = self
         var clip = copy.tracks[loc.trackIndex].clips[loc.clipIndex]
-        let newTimelineDuration = CMTimeMultiplyByFloat64(newSourceRange.duration, multiplier: 1.0 / clip.speed)
+        let rawTimelineDuration = CMTimeMultiplyByFloat64(newSourceRange.duration, multiplier: 1.0 / clip.speed)
+        let newTimelineDuration = CMTimeConvertScale(rawTimelineDuration,
+                                                     timescale: newSourceRange.duration.timescale,
+                                                     method: .default)
         switch edge {
         case .start:
             // Right edge anchored; shift the start so end stays put.

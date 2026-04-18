@@ -51,7 +51,10 @@ public extension Clip {
                           speed: Double = 1.0,
                           volume: Float = 1.0) -> Clip {
         precondition(speed > 0, "speed must be positive")
-        let timelineDuration = CMTimeMultiplyByFloat64(sourceRange.duration, multiplier: 1.0 / speed)
+        let raw = CMTimeMultiplyByFloat64(sourceRange.duration, multiplier: 1.0 / speed)
+        let timelineDuration = CMTimeConvertScale(raw,
+                                                  timescale: sourceRange.duration.timescale,
+                                                  method: .default)
         return Clip(id: id,
                     sourceID: sourceID,
                     sourceRange: sourceRange,
