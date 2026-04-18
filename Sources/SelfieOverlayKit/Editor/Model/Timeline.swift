@@ -136,14 +136,47 @@ public struct Timeline: Hashable {
 
     /// Split whichever clip on the given track contains the timeline time `at`.
     /// The two halves share the original speed and volume.
+    ///
+    /// When `t` lands exactly on a clip edge that is NOT a shared seam between
+    /// two adjacent clips, the split point is snapped one tick inside the
+    /// clip so the user gets visible feedback instead of a silent no-op.
     public func splitting(at t: CMTime, trackID: UUID) -> Timeline {
         guard let ti = tracks.firstIndex(where: { $0.id == trackID }) else { return self }
-        guard let ci = tracks[ti].clips.firstIndex(where: {
-            t > $0.timelineRange.start && t < $0.timelineRange.end
-        }) else { return self }
+        let clips = tracks[ti].clips
 
-        let clip = tracks[ti].clips[ci]
-        let timelineOffset = t - clip.timelineRange.start                 // before split, timeline time into the clip
+        var effectiveT = t
+        var clipIndex = clips.firstIndex(where: {
+            t > $0.timelineRange.start && t < $0.timelineRange.end
+        })
+
+        if clipIndex == nil {
+            let hasAdjacentStart = clips.contains(where: { $0.timelineRange.start == t })
+            let hasAdjacentEnd = clips.contains(where: { $0.timelineRange.end == t })
+            let atSeam = hasAdjacentStart && hasAdjacentEnd
+            if !atSeam {
+                if let ci = clips.firstIndex(where: { $0.timelineRange.start == t }) {
+                    let clip = clips[ci]
+                    let tick = CMTime(value: 1, timescale: clip.timelineRange.duration.timescale)
+                    let snapped = clip.timelineRange.start + tick
+                    if snapped < clip.timelineRange.end {
+                        effectiveT = snapped
+                        clipIndex = ci
+                    }
+                } else if let ci = clips.firstIndex(where: { $0.timelineRange.end == t }) {
+                    let clip = clips[ci]
+                    let tick = CMTime(value: 1, timescale: clip.timelineRange.duration.timescale)
+                    let snapped = clip.timelineRange.end - tick
+                    if snapped > clip.timelineRange.start {
+                        effectiveT = snapped
+                        clipIndex = ci
+                    }
+                }
+            }
+        }
+
+        guard let ci = clipIndex else { return self }
+        let clip = clips[ci]
+        let timelineOffset = effectiveT - clip.timelineRange.start
         let sourceOffset = CMTimeMultiplyByFloat64(timelineOffset, multiplier: clip.speed)
         let splitSourceTime = clip.sourceRange.start + sourceOffset
 
@@ -151,14 +184,14 @@ public struct Timeline: Hashable {
             id: UUID(),
             sourceID: clip.sourceID,
             sourceRange: CMTimeRange(start: clip.sourceRange.start, end: splitSourceTime),
-            timelineRange: CMTimeRange(start: clip.timelineRange.start, end: t),
+            timelineRange: CMTimeRange(start: clip.timelineRange.start, end: effectiveT),
             speed: clip.speed,
             volume: clip.volume)
         let right = Clip(
             id: UUID(),
             sourceID: clip.sourceID,
             sourceRange: CMTimeRange(start: splitSourceTime, end: clip.sourceRange.end),
-            timelineRange: CMTimeRange(start: t, end: clip.timelineRange.end),
+            timelineRange: CMTimeRange(start: effectiveT, end: clip.timelineRange.end),
             speed: clip.speed,
             volume: clip.volume)
 

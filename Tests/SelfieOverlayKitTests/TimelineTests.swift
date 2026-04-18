@@ -101,11 +101,45 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(clips[1].sourceRange.start, t(4))
     }
 
-    func testSplitOnEdgeIsNoop() {
+    func testSplitOnClipStartSnapsOneTickInside() {
         let tl = makeTimeline()
         let track = tl.tracks[0]
-        XCTAssertEqual(tl.splitting(at: .zero, trackID: track.id), tl)
-        XCTAssertEqual(tl.splitting(at: t(10), trackID: track.id), tl)
+        let out = tl.splitting(at: .zero, trackID: track.id)
+        XCTAssertEqual(out.tracks[0].clips.count, 2,
+                       "split at clip start must not silently no-op")
+        XCTAssertEqual(out.tracks[0].clips[0].timelineRange.start, .zero)
+        XCTAssertGreaterThan(out.tracks[0].clips[1].timelineRange.duration.seconds, 0)
+    }
+
+    func testSplitOnClipEndSnapsOneTickInside() {
+        let tl = makeTimeline()
+        let track = tl.tracks[0]
+        let out = tl.splitting(at: t(10), trackID: track.id)
+        XCTAssertEqual(out.tracks[0].clips.count, 2,
+                       "split at clip end must not silently no-op")
+        XCTAssertEqual(out.tracks[0].clips[1].timelineRange.end, t(10))
+        XCTAssertGreaterThan(out.tracks[0].clips[0].timelineRange.duration.seconds, 0)
+    }
+
+    func testSplitOutsideAllClipsIsNoop() {
+        let tl = makeTimeline()
+        let track = tl.tracks[0]
+        // t(20) is past the single [0, 10] clip — no edge to snap to.
+        XCTAssertEqual(tl.splitting(at: t(20), trackID: track.id), tl)
+    }
+
+    func testSplitAtSharedSeamBetweenAdjacentClipsIsNoop() {
+        let a = Clip(sourceID: .screen,
+                     sourceRange: range(0, duration: 3),
+                     timelineRange: range(0, duration: 3))
+        let b = Clip(sourceID: .screen,
+                     sourceRange: range(3, duration: 3),
+                     timelineRange: range(3, duration: 3))
+        let track = Track(kind: .video, sourceBinding: .screen, clips: [a, b])
+        let tl = Timeline(tracks: [track], duration: t(6))
+        // t = 3 is a seam — both clips share the boundary. The cut already
+        // exists so nothing to do.
+        XCTAssertEqual(tl.splitting(at: t(3), trackID: track.id), tl)
     }
 
     func testSplitAtSpeed2HalvesSourceDifferently() {

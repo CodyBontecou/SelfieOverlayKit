@@ -70,11 +70,21 @@ final class SplitTests: XCTestCase {
         XCTAssertEqual(store.timeline.tracks[0].clips.count, 1)
     }
 
-    // MARK: - AC: split is a no-op when the playhead is outside the clip
+    // MARK: - AC: split at an isolated edge snaps inside so the user sees feedback
 
-    func testSplitAtEdgeDoesNothing() {
+    func testSplitAtIsolatedClipStartSnapsInside() {
         let (timeline, trackID, _) = makeTimelineWithOneClip()
-        XCTAssertEqual(timeline.splitting(at: .zero, trackID: trackID), timeline)
-        XCTAssertEqual(timeline.splitting(at: t(2), trackID: trackID), timeline)
+        let out = timeline.splitting(at: .zero, trackID: trackID)
+        XCTAssertEqual(out.tracks[0].clips.count, 2,
+                       "split at clip start must snap rather than silently no-op")
+        XCTAssertEqual(out.tracks[0].clips[0].timelineRange.start, .zero)
+    }
+
+    func testSplitAtIsolatedClipEndSnapsInside() {
+        let (timeline, trackID, _) = makeTimelineWithOneClip()
+        let out = timeline.splitting(at: t(2), trackID: trackID)
+        XCTAssertEqual(out.tracks[0].clips.count, 2,
+                       "split at clip end must snap rather than silently no-op")
+        XCTAssertEqual(out.tracks[0].clips[1].timelineRange.end, t(2))
     }
 }
