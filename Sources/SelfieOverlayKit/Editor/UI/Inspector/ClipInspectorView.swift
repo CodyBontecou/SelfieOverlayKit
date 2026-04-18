@@ -81,6 +81,21 @@ final class ClipInspectorView: UIView {
     /// deletion is one undoable step.
     var onDelete: (() -> Void)?
 
+    // MARK: - Duplicate
+
+    let duplicateButton: UIButton = {
+        let b = UIButton(type: .system)
+        b.setImage(UIImage(systemName: "plus.square.on.square"), for: .normal)
+        b.accessibilityLabel = "Duplicate clip"
+        b.accessibilityIdentifier = "inspector.duplicate"
+        return b
+    }()
+
+    /// Fires when duplicate is tapped. The editor routes this through
+    /// `Timeline.duplicating(clipID:)` and `EditStore.apply` so the
+    /// duplicate is one undoable step.
+    var onDuplicate: (() -> Void)?
+
     var onClose: (() -> Void)?
 
     /// Fires while the slider is being dragged (for live label updates).
@@ -143,6 +158,10 @@ final class ClipInspectorView: UIView {
         deleteButton.addTarget(self, action: #selector(didTapDelete), for: .touchUpInside)
         addSubview(deleteButton)
 
+        duplicateButton.translatesAutoresizingMaskIntoConstraints = false
+        duplicateButton.addTarget(self, action: #selector(didTapDuplicate), for: .touchUpInside)
+        addSubview(duplicateButton)
+
         NSLayoutConstraint.activate([
             closeButton.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
@@ -154,11 +173,16 @@ final class ClipInspectorView: UIView {
             deleteButton.widthAnchor.constraint(equalToConstant: 28),
             deleteButton.heightAnchor.constraint(equalToConstant: 28),
 
+            duplicateButton.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            duplicateButton.trailingAnchor.constraint(equalTo: deleteButton.leadingAnchor, constant: -8),
+            duplicateButton.widthAnchor.constraint(equalToConstant: 28),
+            duplicateButton.heightAnchor.constraint(equalToConstant: 28),
+
             stack.topAnchor.constraint(equalTo: topAnchor, constant: 12),
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            // Leave room for the close + delete buttons so slider value labels
-            // ("1.00×", "100%") don't slide under them.
-            stack.trailingAnchor.constraint(equalTo: deleteButton.leadingAnchor, constant: -8),
+            // Leave room for the close / delete / duplicate buttons so slider
+            // value labels ("1.00×", "100%") don't slide under them.
+            stack.trailingAnchor.constraint(equalTo: duplicateButton.leadingAnchor, constant: -8),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12)
         ])
 
@@ -174,6 +198,10 @@ final class ClipInspectorView: UIView {
 
     @objc private func didTapDelete() {
         onDelete?()
+    }
+
+    @objc private func didTapDuplicate() {
+        onDuplicate?()
     }
 
     // MARK: - Public API

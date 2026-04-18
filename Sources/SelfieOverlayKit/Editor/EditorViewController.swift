@@ -223,6 +223,9 @@ public final class EditorViewController: UIViewController {
         inspector.onDelete = { [weak self] in
             self?.commitDelete()
         }
+        inspector.onDuplicate = { [weak self] in
+            self?.commitDuplicate()
+        }
         view.addSubview(inspector)
 
         NSLayoutConstraint.activate([
@@ -585,6 +588,11 @@ public final class EditorViewController: UIViewController {
         guard let clipID = timelineView.selectedClipID else { return }
         editStore.apply(name: "Delete Clip") { $0.removing(clipID: clipID) }
         deselectClip()
+    }
+
+    private func commitDuplicate() {
+        guard let clipID = timelineView.selectedClipID else { return }
+        editStore.apply(name: "Duplicate Clip") { $0.duplicating(clipID: clipID) }
     }
 
     @objc func didTapSplit() {

@@ -158,6 +158,62 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(clips[1].sourceRange.start.seconds, 4.0, accuracy: 1e-6)
     }
 
+    // MARK: - Duplicate
+
+    func testDuplicateAppendsCopyAfterOriginalWhenSpaceIsFree() {
+        let clip = Clip(sourceID: .screen,
+                        sourceRange: range(0, duration: 2),
+                        timelineRange: range(0, duration: 2),
+                        speed: 1.5,
+                        volume: 0.75)
+        let track = Track(kind: .video, sourceBinding: .screen, clips: [clip])
+        let tl = Timeline(tracks: [track], duration: t(2))
+        let out = tl.duplicating(clipID: clip.id)
+
+        XCTAssertEqual(out.tracks[0].clips.count, 2)
+        let copy = out.tracks[0].clips[1]
+        XCTAssertNotEqual(copy.id, clip.id, "duplicate must have its own id")
+        XCTAssertEqual(copy.timelineRange.start, t(2),
+                       "duplicate should land right after the original when the track is free")
+        XCTAssertEqual(copy.timelineRange.duration, clip.timelineRange.duration)
+        XCTAssertEqual(copy.sourceRange, clip.sourceRange)
+        XCTAssertEqual(copy.speed, 1.5, accuracy: 1e-6)
+        XCTAssertEqual(copy.volume, 0.75, accuracy: 1e-6)
+        XCTAssertEqual(out.duration, t(4),
+                       "duration must extend to cover the duplicate")
+    }
+
+    func testDuplicateSkipsPastOverlappingClipsOnSameTrack() {
+        let a = Clip(sourceID: .screen,
+                     sourceRange: range(0, duration: 2),
+                     timelineRange: range(0, duration: 2))
+        let b = Clip(sourceID: .screen,
+                     sourceRange: range(0, duration: 1),
+                     timelineRange: range(2, duration: 1))
+        let track = Track(kind: .video, sourceBinding: .screen, clips: [a, b])
+        let tl = Timeline(tracks: [track], duration: t(3))
+        let out = tl.duplicating(clipID: a.id)
+
+        XCTAssertEqual(out.tracks[0].clips.count, 3)
+        let copy = out.tracks[0].clips.first { $0.id != a.id && $0.id != b.id }!
+        XCTAssertEqual(copy.timelineRange.start, t(3),
+                       "duplicate must skip past clip b (which sits at [2, 3])")
+        XCTAssertEqual(out.duration, t(5))
+    }
+
+    func testDuplicateThroughEditStoreIsOneUndoStep() {
+        let clip = Clip(sourceID: .screen,
+                        sourceRange: range(0, duration: 2),
+                        timelineRange: range(0, duration: 2))
+        let track = Track(kind: .video, sourceBinding: .screen, clips: [clip])
+        let tl = Timeline(tracks: [track], duration: t(2))
+        let store = EditStore(timeline: tl)
+        store.apply(name: "Duplicate Clip") { $0.duplicating(clipID: clip.id) }
+        XCTAssertEqual(store.timeline.tracks[0].clips.count, 2)
+        store.undo()
+        XCTAssertEqual(store.timeline.tracks[0].clips.count, 1)
+    }
+
     // MARK: - Remove
 
     func testRemoveDeletesClip() {

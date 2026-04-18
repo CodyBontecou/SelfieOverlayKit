@@ -48,6 +48,45 @@ public struct Timeline: Hashable {
         return copy
     }
 
+    /// Insert a copy of the given clip on the same track. The duplicate
+    /// starts at the original's end and, if that would overlap the next
+    /// clip, skips forward past each overlapping clip until a gap opens up.
+    /// Total `duration` grows to accommodate the duplicate when it lands
+    /// past the current end.
+    public func duplicating(clipID: UUID) -> Timeline {
+        guard let loc = locate(clipID: clipID) else { return self }
+        let source = tracks[loc.trackIndex].clips[loc.clipIndex]
+        let clipDuration = source.timelineRange.duration
+
+        // Walk forward from the original's end, skipping past any clip that
+        // would overlap the duplicate's footprint.
+        var candidateStart = source.timelineRange.end
+        let others = tracks[loc.trackIndex].clips.filter { $0.id != source.id }
+        let sorted = others.sorted { $0.timelineRange.start < $1.timelineRange.start }
+        for other in sorted where other.timelineRange.end > candidateStart {
+            let candidateEnd = candidateStart + clipDuration
+            if other.timelineRange.start < candidateEnd && other.timelineRange.end > candidateStart {
+                candidateStart = other.timelineRange.end
+            }
+        }
+
+        let duplicate = Clip(
+            id: UUID(),
+            sourceID: source.sourceID,
+            sourceRange: source.sourceRange,
+            timelineRange: CMTimeRange(start: candidateStart, duration: clipDuration),
+            speed: source.speed,
+            volume: source.volume)
+
+        var copy = self
+        copy.tracks[loc.trackIndex].clips.append(duplicate)
+        copy.tracks[loc.trackIndex].clips.sort { $0.timelineRange.start < $1.timelineRange.start }
+        if duplicate.timelineRange.end > copy.duration {
+            copy.duration = duplicate.timelineRange.end
+        }
+        return copy
+    }
+
     /// Apply a new speed to the clip *and* to every overlapping audio clip
     /// on other audio tracks, so paired video + audio stay in lockstep.
     /// A single call bundles everything into one undo step.
