@@ -7,7 +7,6 @@ struct BubbleConfigPanel: View {
     @ObservedObject var settings: SettingsStore
     @ObservedObject var recorder: RecordingController
     let onToggleRecording: () -> Void
-    let onTurnOff: () -> Void
     let onClose: () -> Void
 
     var body: some View {
@@ -47,8 +46,6 @@ struct BubbleConfigPanel: View {
                     .overlay(Circle().stroke(.secondary, lineWidth: 0.5))
             }
 
-            turnOffButton
-
             Button(role: .destructive) { settings.reset() } label: {
                 Text("Reset").font(.footnote)
             }
@@ -76,22 +73,6 @@ struct BubbleConfigPanel: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Close")
         }
-    }
-
-    private var turnOffButton: some View {
-        Button(action: onTurnOff) {
-            HStack(spacing: 6) {
-                Image(systemName: "camera.slash.fill")
-                    .font(.system(size: 16))
-                Text("Turn Off Camera")
-                    .font(.subheadline.weight(.medium))
-            }
-            .foregroundStyle(.red)
-            .frame(maxWidth: .infinity)
-            .frame(height: 40)
-            .background(Color.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-        }
-        .buttonStyle(.plain)
     }
 
     private var recordButton: some View {
