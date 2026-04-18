@@ -75,6 +75,20 @@ final class CameraVideoRecorder {
                 }
                 return
             }
+            // No camera sample ever arrived — writer never transitioned out of .unknown,
+            // and calling markAsFinished in that state throws NSInternalInconsistencyException.
+            guard writer.status == .writing else {
+                if let url = self.outputURL {
+                    try? FileManager.default.removeItem(at: url)
+                }
+                self.writer = nil
+                self.input = nil
+                self.outputURL = nil
+                DispatchQueue.main.async {
+                    completion(.failure(CameraRecorderError.notStarted))
+                }
+                return
+            }
             self.input?.markAsFinished()
             writer.finishWriting { [weak self] in
                 DispatchQueue.main.async {

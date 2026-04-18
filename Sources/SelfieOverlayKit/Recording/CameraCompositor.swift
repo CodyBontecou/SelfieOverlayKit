@@ -238,6 +238,35 @@ final class CameraCompositor {
         var callbackInvocations = 0
         let videoDone = DispatchSemaphore(value: 0)
 
+        let audioDone = DispatchSemaphore(value: 0)
+
+        // Audio pull can only start after the video callback calls startSession(atSourceTime:).
+        // Appending audio before that throws NSInternalInconsistencyException, and the two
+        // inputs run on separate queues with no inherent ordering.
+        let startAudioPull: () -> Void = { [audioInput, audioOut, audioQueue] in
+            guard let audioInput, let audioOut else {
+                audioDone.signal()
+                return
+            }
+            audioInput.requestMediaDataWhenReady(on: audioQueue) {
+                while audioInput.isReadyForMoreMediaData {
+                    guard let sample = audioOut.copyNextSampleBuffer() else {
+                        DebugLog.log("compositor", "audio reader exhausted")
+                        audioInput.markAsFinished()
+                        audioDone.signal()
+                        return
+                    }
+                    if !audioInput.append(sample) {
+                        DebugLog.log("compositor", "audio append failed: \(String(describing: writer.error))")
+                        audioInput.markAsFinished()
+                        audioDone.signal()
+                        return
+                    }
+                }
+            }
+        }
+        var audioStarted = false
+
         videoInput.requestMediaDataWhenReady(on: videoQueue) { [weak self] in
             guard let self else { return }
             callbackInvocations += 1
@@ -265,6 +294,10 @@ final class CameraCompositor {
                     sessionStarted = true
                     firstScreenPTSSeconds = CMTimeGetSeconds(screenPTS)
                     DebugLog.log("compositor", "first frame: pts=\(String(format: "%.3f", firstScreenPTSSeconds))s")
+                    if !audioStarted {
+                        audioStarted = true
+                        startAudioPull()
+                    }
                 }
 
                 while let next = nextCameraFrame,
@@ -327,30 +360,15 @@ final class CameraCompositor {
             }
         }
 
-        let audioDone = DispatchSemaphore(value: 0)
-        if let audioInput, let audioOut {
-            audioInput.requestMediaDataWhenReady(on: audioQueue) {
-                while audioInput.isReadyForMoreMediaData {
-                    guard let sample = audioOut.copyNextSampleBuffer() else {
-                        DebugLog.log("compositor", "audio reader exhausted")
-                        audioInput.markAsFinished()
-                        audioDone.signal()
-                        return
-                    }
-                    if !audioInput.append(sample) {
-                        DebugLog.log("compositor", "audio append failed: \(String(describing: writer.error))")
-                        audioInput.markAsFinished()
-                        audioDone.signal()
-                        return
-                    }
-                }
-            }
-        } else {
-            audioDone.signal()
-        }
-
         DebugLog.log("compositor", "waiting on video + audio inputs")
         videoDone.wait()
+        // If the video callback never started the session (e.g. no screen frames at all),
+        // audioStarted is still false and the audio semaphore would never be signalled.
+        if !audioStarted {
+            audioStarted = true
+            if let audioInput { audioInput.markAsFinished() }
+            audioDone.signal()
+        }
         audioDone.wait()
         DebugLog.log("compositor", "inputs done, calling finishWriting")
 
