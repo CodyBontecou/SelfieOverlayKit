@@ -13,6 +13,11 @@ public final class EditStore: ObservableObject {
     public init(timeline: Timeline, undoManager: UndoManager = UndoManager()) {
         self.timeline = timeline
         self.undoManager = undoManager
+        // `apply` wraps each mutation in its own begin/end group. With the
+        // default `groupsByEvent = true`, all registrations in a single
+        // run-loop turn collapse into one outer auto-group, so back-to-back
+        // mutations would pop together on undo.
+        self.undoManager.groupsByEvent = false
     }
 
     /// Replace the current timeline with the result of `mutation`. Registers
@@ -38,6 +43,10 @@ public final class EditStore: ObservableObject {
     public var canRedo: Bool { undoManager.canRedo }
 
     private func swap(to next: Timeline, previous: Timeline, name: String?) {
+        // Wrap each apply() in its own undo group so consecutive mutations
+        // pop off one at a time; the default UndoManager groups everything
+        // registered in a single run-loop turn into one group.
+        undoManager.beginUndoGrouping()
         timeline = next
         undoManager.registerUndo(withTarget: self) { store in
             // Inverse swap — registers redo against the undo stack too.
@@ -46,5 +55,6 @@ public final class EditStore: ObservableObject {
         if let name {
             undoManager.setActionName(name)
         }
+        undoManager.endUndoGrouping()
     }
 }
