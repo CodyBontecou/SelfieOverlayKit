@@ -145,15 +145,36 @@ final class CameraCompositor {
         screenVideoReader.add(screenVideoOut)
         cameraReader.add(cameraOut)
 
-        // Audio passthrough: read with nil settings so samples land as-is.
+        // Decode the source AAC to LPCM here so the writer can re-encode to AAC
+        // in the output container. Straight passthrough (outputSettings: nil)
+        // loses the source MOV's edit list / AAC priming offset when copied into
+        // an MP4, which shifts audio ~48 ms ahead of video in the export.
+        //
+        // Clamp the reader's timeRange to the video track's start so any audio
+        // ReplayKit captured before the first video frame is skipped — otherwise
+        // that extra pre-video audio ends up at the head of the export and
+        // plays ahead of the video for the rest of the clip.
         var audioReader: AVAssetReader?
         var audioOut: AVAssetReaderTrackOutput?
         if let screenAudioTrack {
             let reader = try AVAssetReader(asset: screenAsset)
-            let out = AVAssetReaderTrackOutput(track: screenAudioTrack, outputSettings: nil)
+            reader.timeRange = CMTimeRange(
+                start: screenVideoTrack.timeRange.start,
+                duration: .positiveInfinity)
+            let pcmSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsNonInterleaved: false
+            ]
+            let out = AVAssetReaderTrackOutput(track: screenAudioTrack, outputSettings: pcmSettings)
             reader.add(out)
             audioReader = reader
             audioOut = out
+            let vStart = CMTimeGetSeconds(screenVideoTrack.timeRange.start)
+            let aStart = CMTimeGetSeconds(screenAudioTrack.timeRange.start)
+            DebugLog.log("compositor", "audio sync: videoTrackStart=\(String(format: "%.4f", vStart))s audioTrackStart=\(String(format: "%.4f", aStart))s offset=\(String(format: "%+.4f", aStart - vStart))s")
         }
 
         notify("Initializing writer")
@@ -186,13 +207,21 @@ final class CameraCompositor {
 
         var audioInput: AVAssetWriterInput?
         if audioOut != nil, let screenAudioTrack {
-            // Passthrough audio into an .mp4 container needs a sourceFormatHint,
-            // otherwise writer.canAdd silently refuses the input and the export
-            // comes out muted.
-            let hint = screenAudioTrack.formatDescriptions.first
-                .map { $0 as! CMFormatDescription }
-            let input = AVAssetWriterInput(
-                mediaType: .audio, outputSettings: nil, sourceFormatHint: hint)
+            var sampleRate: Double = 44100
+            var channels: Int = 2
+            if let fmt = screenAudioTrack.formatDescriptions.first,
+               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(
+                fmt as! CMAudioFormatDescription)?.pointee {
+                if asbd.mSampleRate > 0 { sampleRate = asbd.mSampleRate }
+                if asbd.mChannelsPerFrame > 0 { channels = Int(asbd.mChannelsPerFrame) }
+            }
+            let audioSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVNumberOfChannelsKey: channels,
+                AVSampleRateKey: sampleRate,
+                AVEncoderBitRateKey: 128_000
+            ]
+            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
             input.expectsMediaDataInRealTime = false
             if writer.canAdd(input) {
                 writer.add(input)
@@ -248,13 +277,19 @@ final class CameraCompositor {
                 audioDone.signal()
                 return
             }
+            var audioSamplesAppended = 0
             audioInput.requestMediaDataWhenReady(on: audioQueue) {
                 while audioInput.isReadyForMoreMediaData {
                     guard let sample = audioOut.copyNextSampleBuffer() else {
-                        DebugLog.log("compositor", "audio reader exhausted")
+                        DebugLog.log("compositor", "audio reader exhausted after \(audioSamplesAppended) samples")
                         audioInput.markAsFinished()
                         audioDone.signal()
                         return
+                    }
+                    if audioSamplesAppended < 3 {
+                        let pts = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample))
+                        let dur = CMTimeGetSeconds(CMSampleBufferGetDuration(sample))
+                        DebugLog.log("compositor", "audio sample #\(audioSamplesAppended) pts=\(String(format: "%.4f", pts))s dur=\(String(format: "%.4f", dur))s")
                     }
                     if !audioInput.append(sample) {
                         DebugLog.log("compositor", "audio append failed: \(String(describing: writer.error))")
@@ -262,6 +297,7 @@ final class CameraCompositor {
                         audioDone.signal()
                         return
                     }
+                    audioSamplesAppended += 1
                 }
             }
         }
@@ -298,6 +334,13 @@ final class CameraCompositor {
                         audioStarted = true
                         startAudioPull()
                     }
+                }
+
+                // Log the first few frames' deltas so we can see if ReplayKit
+                // emits an irregular gap at the start of the recording.
+                if framesProcessed < 6 {
+                    let t = CMTimeGetSeconds(screenPTS) - firstScreenPTSSeconds
+                    DebugLog.log("compositor", "video frame #\(framesProcessed) t=\(String(format: "%.4f", t))s pts=\(String(format: "%.4f", CMTimeGetSeconds(screenPTS)))s")
                 }
 
                 while let next = nextCameraFrame,
