@@ -14,11 +14,11 @@ final class BubbleView: UIView {
     private var pinchStartSize: CGFloat = 0
     private var cancellables = Set<AnyCancellable>()
 
-    /// Called when the user taps the bubble. Host controller toggles the inline config panel.
-    var onRequestConfig: (() -> Void)?
+    /// Called when the user taps the bubble. Host controller toggles the radial action ring.
+    var onTap: (() -> Void)?
 
     /// Called when the user starts a pan or pinch on the bubble, so the controller can
-    /// dismiss the config panel to keep it from drifting away from the bubble.
+    /// dismiss any open affordance (action ring, config panel) before it drifts.
     var onInteractionBegan: (() -> Void)?
 
     init(cameraSession: CameraSession, settings: SettingsStore) {
@@ -172,7 +172,7 @@ final class BubbleView: UIView {
     }
 
     @objc private func handleTap() {
-        onRequestConfig?()
+        onTap?()
     }
 
     // MARK: - Layout helpers

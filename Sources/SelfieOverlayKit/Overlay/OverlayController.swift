@@ -21,6 +21,10 @@ final class OverlayController {
     private var bubble: BubbleView?
     private var panelHost: UIHostingController<BubbleConfigPanel>?
     private var panelDismissCatcher: DismissCatcherView?
+    private var actionRingHost: UIHostingController<BubbleActionRing>?
+    private var actionRingContainer: BubbleActionRingContainerView?
+    private var actionRingState: BubbleActionRingState?
+    private var actionRingDismissCatcher: DismissCatcherView?
 
     init() {
         NotificationCenter.default.addObserver(
@@ -53,10 +57,11 @@ final class OverlayController {
         window.isHidden = false
 
         let bubble = BubbleView(cameraSession: cameraSession, settings: settingsStore)
-        bubble.onRequestConfig = { [weak self] in
-            self?.toggleConfigPanel()
+        bubble.onTap = { [weak self] in
+            self?.toggleActionRing()
         }
         bubble.onInteractionBegan = { [weak self] in
+            self?.hideActionRing()
             self?.hideConfigPanel()
         }
         root.view.addSubview(bubble)
@@ -68,6 +73,7 @@ final class OverlayController {
     }
 
     func hide() {
+        hideActionRing(animated: false)
         hideConfigPanel()
         cameraSession.stop()
         bubble?.removeFromSuperview()
@@ -92,7 +98,10 @@ final class OverlayController {
     /// Used while the recording preview/edit screen is showing.
     func setBubbleHidden(_ hidden: Bool) {
         guard let overlayWindow else { return }
-        if hidden { hideConfigPanel() }
+        if hidden {
+            hideActionRing(animated: false)
+            hideConfigPanel()
+        }
         overlayWindow.isHidden = hidden
         if hidden {
             cameraSession.stop()
@@ -108,6 +117,114 @@ final class OverlayController {
         let host = UIHostingController(rootView: view)
         host.modalPresentationStyle = .formSheet
         presenter.present(host, animated: true)
+    }
+
+    // MARK: - Action ring
+
+    func toggleActionRing() {
+        if actionRingHost != nil {
+            hideActionRing()
+        } else {
+            showActionRing()
+        }
+    }
+
+    private func showActionRing() {
+        guard actionRingHost == nil,
+              let overlayWindow,
+              let root = overlayWindow.rootViewController,
+              let bubble else { return }
+
+        // Dismiss the panel if it happened to be open via some other path.
+        hideConfigPanel()
+
+        let placement: BubbleActionRing.Placement = {
+            let topGap = bubble.frame.minY - root.view.safeAreaInsets.top
+            let neededAbove = BubbleActionRing.iconSize + BubbleActionRing.edgeGap + 8
+            return topGap < neededAbove ? .bottom : .top
+        }()
+
+        let state = BubbleActionRingState()
+        let ring = BubbleActionRing(
+            state: state,
+            bubbleSize: bubble.bounds.width,
+            placement: placement,
+            onClose: { [weak self] in self?.handleTurnOff() },
+            onEdit: { [weak self] in
+                guard let self else { return }
+                self.hideActionRing()
+                self.showConfigPanel()
+            }
+        )
+        let host = UIHostingController(rootView: ring)
+        host.view.backgroundColor = .clear
+
+        let catcher = DismissCatcherView(frame: root.view.bounds)
+        catcher.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        catcher.bubble = bubble
+        let dismissTap = UITapGestureRecognizer(target: self, action: #selector(handleActionRingDismissTap))
+        catcher.addGestureRecognizer(dismissTap)
+        root.view.addSubview(catcher)
+
+        let side = BubbleActionRing.containerSize(bubbleSize: bubble.bounds.width)
+        let container = BubbleActionRingContainerView(
+            frame: CGRect(x: bubble.center.x - side / 2,
+                          y: bubble.center.y - side / 2,
+                          width: side,
+                          height: side))
+        container.iconCenters = BubbleActionRing.iconCenters(
+            bubbleSize: bubble.bounds.width,
+            placement: placement)
+        host.view.frame = container.bounds
+        host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        container.addSubview(host.view)
+
+        root.addChild(host)
+        root.view.addSubview(container)
+        host.didMove(toParent: root)
+
+        actionRingHost = host
+        actionRingContainer = container
+        actionRingState = state
+        actionRingDismissCatcher = catcher
+
+        // Defer the visibility flip one runloop tick so SwiftUI can register the
+        // initial (collapsed) state and animate the transition to visible.
+        DispatchQueue.main.async {
+            state.visible = true
+        }
+    }
+
+    @objc private func handleActionRingDismissTap() {
+        hideActionRing()
+    }
+
+    func hideActionRing(animated: Bool = true) {
+        actionRingDismissCatcher?.removeFromSuperview()
+        actionRingDismissCatcher = nil
+
+        guard let host = actionRingHost,
+              let container = actionRingContainer,
+              let state = actionRingState else { return }
+        actionRingHost = nil
+        actionRingContainer = nil
+        actionRingState = nil
+
+        let cleanup = {
+            host.willMove(toParent: nil)
+            host.view.removeFromSuperview()
+            host.removeFromParent()
+            container.removeFromSuperview()
+        }
+
+        if animated {
+            state.visible = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
+                cleanup()
+            }
+        } else {
+            cleanup()
+        }
     }
 
     // MARK: - Inline config panel
