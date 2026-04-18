@@ -631,9 +631,7 @@ public final class EditorViewController: UIViewController {
                 case .authorized, .limited:
                     self.performSave()
                 default:
-                    self.presentAlert(
-                        title: "Photos Access Denied",
-                        message: "Enable Photos access in Settings to save recordings.")
+                    self.presentPhotosDeniedAlert()
                 }
             }
         }
@@ -687,6 +685,12 @@ public final class EditorViewController: UIViewController {
                             guard let self else { return }
                             if ok {
                                 self.presentAlert(title: "Saved", message: "Saved to Photos.")
+                            } else if !Self.isPhotosAddOnlyAuthorized() {
+                                // User revoked Photos access via Settings between
+                                // the initial authorization request and the
+                                // PhotoKit write — show the same actionable
+                                // Settings alert instead of a generic failure.
+                                self.presentPhotosDeniedAlert()
                             } else {
                                 self.presentAlert(
                                     title: "Save Failed",
@@ -773,6 +777,27 @@ public final class EditorViewController: UIViewController {
         let alert = UIAlertController(
             title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+
+    static func isPhotosAddOnlyAuthorized() -> Bool {
+        switch PHPhotoLibrary.authorizationStatus(for: .addOnly) {
+        case .authorized, .limited: return true
+        default: return false
+        }
+    }
+
+    private func presentPhotosDeniedAlert() {
+        let alert = UIAlertController(
+            title: "Photos Access Denied",
+            message: "Enable Photos access in Settings to save recordings.",
+            preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Open Settings", style: .default) { _ in
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url)
+            }
+        })
         present(alert, animated: true)
     }
 
