@@ -594,9 +594,13 @@ public final class EditorViewController: UIViewController {
                         PHAssetCreationRequest.creationRequestForAssetFromVideo(
                             atFileURL: url)
                     } completionHandler: { [weak self] ok, err in
+                        // The temp file must be unlinked whether or not `self`
+                        // is still alive — otherwise a VC that deallocates
+                        // during the PhotoKit round-trip leaves the export
+                        // stranded in NSTemporaryDirectory.
+                        try? FileManager.default.removeItem(at: url)
                         DispatchQueue.main.async {
                             guard let self else { return }
-                            try? FileManager.default.removeItem(at: url)
                             if ok {
                                 self.presentAlert(title: "Saved", message: "Saved to Photos.")
                             } else {
