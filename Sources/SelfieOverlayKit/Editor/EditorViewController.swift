@@ -185,6 +185,9 @@ public final class EditorViewController: UIViewController {
         inspector.onClose = { [weak self] in
             self?.deselectClip()
         }
+        inspector.onDelete = { [weak self] in
+            self?.commitDelete()
+        }
         view.addSubview(inspector)
 
         NSLayoutConstraint.activate([
@@ -541,6 +544,12 @@ public final class EditorViewController: UIViewController {
     private func commitVolume(_ volume: Float) {
         guard let clipID = timelineView.selectedClipID else { return }
         editStore.apply(name: "Volume") { $0.settingVolume(clipID: clipID, volume) }
+    }
+
+    private func commitDelete() {
+        guard let clipID = timelineView.selectedClipID else { return }
+        editStore.apply(name: "Delete Clip") { $0.removing(clipID: clipID) }
+        deselectClip()
     }
 
     @objc func didTapSplit() {

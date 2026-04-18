@@ -66,6 +66,21 @@ final class EditStoreTests: XCTestCase {
         XCTAssertEqual(store.timeline, s2)
     }
 
+    func testRemovingClipAppliesAndUndoesThroughEditStore() {
+        let (store, clip, _) = makeStore()
+        let initial = store.timeline
+        XCTAssertEqual(store.timeline.tracks[0].clips.count, 1)
+
+        store.apply(name: "Delete Clip") { $0.removing(clipID: clip.id) }
+        XCTAssertEqual(store.timeline.tracks[0].clips.count, 0,
+                       "removing via EditStore must drop the clip")
+        XCTAssertTrue(store.canUndo)
+
+        store.undo()
+        XCTAssertEqual(store.timeline, initial,
+                       "undo must restore the deleted clip exactly")
+    }
+
     func testNoOpMutationDoesNotRegisterUndo() {
         let (store, _, _) = makeStore()
         store.apply { $0 } // identity

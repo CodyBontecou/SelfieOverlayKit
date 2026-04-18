@@ -65,6 +65,22 @@ final class ClipInspectorView: UIView {
         return b
     }()
 
+    // MARK: - Delete
+
+    let deleteButton: UIButton = {
+        let b = UIButton(type: .system)
+        b.setImage(UIImage(systemName: "trash"), for: .normal)
+        b.tintColor = .systemRed
+        b.accessibilityLabel = "Delete clip"
+        b.accessibilityIdentifier = "inspector.delete"
+        return b
+    }()
+
+    /// Fires when the trash button is tapped. The editor applies
+    /// `Timeline.removing(clipID:)` through `EditStore.apply` so the
+    /// deletion is one undoable step.
+    var onDelete: (() -> Void)?
+
     var onClose: (() -> Void)?
 
     /// Fires while the slider is being dragged (for live label updates).
@@ -123,17 +139,26 @@ final class ClipInspectorView: UIView {
         closeButton.addTarget(self, action: #selector(didTapClose), for: .touchUpInside)
         addSubview(closeButton)
 
+        deleteButton.translatesAutoresizingMaskIntoConstraints = false
+        deleteButton.addTarget(self, action: #selector(didTapDelete), for: .touchUpInside)
+        addSubview(deleteButton)
+
         NSLayoutConstraint.activate([
             closeButton.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             closeButton.widthAnchor.constraint(equalToConstant: 28),
             closeButton.heightAnchor.constraint(equalToConstant: 28),
 
+            deleteButton.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            deleteButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -8),
+            deleteButton.widthAnchor.constraint(equalToConstant: 28),
+            deleteButton.heightAnchor.constraint(equalToConstant: 28),
+
             stack.topAnchor.constraint(equalTo: topAnchor, constant: 12),
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            // Leave room for the close button so slider value labels
-            // ("1.00×", "100%") don't slide under it.
-            stack.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -8),
+            // Leave room for the close + delete buttons so slider value labels
+            // ("1.00×", "100%") don't slide under them.
+            stack.trailingAnchor.constraint(equalTo: deleteButton.leadingAnchor, constant: -8),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12)
         ])
 
@@ -145,6 +170,10 @@ final class ClipInspectorView: UIView {
 
     @objc private func didTapClose() {
         onClose?()
+    }
+
+    @objc private func didTapDelete() {
+        onDelete?()
     }
 
     // MARK: - Public API
