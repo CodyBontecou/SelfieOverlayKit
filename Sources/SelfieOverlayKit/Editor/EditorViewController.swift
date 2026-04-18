@@ -31,7 +31,7 @@ public final class EditorViewController: UIViewController {
     let playPauseButton = UIButton(type: .system)
     let timeLabel = UILabel()
     let toolbarRow = UIStackView()
-    let timelinePlaceholder = UIView()
+    let timelineView = TimelineView()
 
     // MARK: - State
 
@@ -73,6 +73,23 @@ public final class EditorViewController: UIViewController {
         setupLayout()
         previewCanvas.player = playback.player
         bindTimeLabel()
+        bindTimeline()
+    }
+
+    private func bindTimeline() {
+        editStore.$timeline
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] timeline in
+                self?.timelineView.update(timeline: timeline)
+            }
+            .store(in: &cancellables)
+
+        playback.currentTime
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] time in
+                self?.timelineView.setPlayhead(time)
+            }
+            .store(in: &cancellables)
     }
 
     public override func viewDidAppear(_ animated: Bool) {
@@ -123,16 +140,14 @@ public final class EditorViewController: UIViewController {
         toolbarRow.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(toolbarRow)
 
-        timelinePlaceholder.translatesAutoresizingMaskIntoConstraints = false
-        timelinePlaceholder.backgroundColor = .secondarySystemBackground
-        timelinePlaceholder.layer.cornerRadius = 8
-        let timelineLabel = UILabel()
-        timelineLabel.text = "Timeline (T8)"
-        timelineLabel.textColor = .secondaryLabel
-        timelineLabel.font = .systemFont(ofSize: 13, weight: .medium)
-        timelineLabel.translatesAutoresizingMaskIntoConstraints = false
-        timelinePlaceholder.addSubview(timelineLabel)
-        view.addSubview(timelinePlaceholder)
+        timelineView.translatesAutoresizingMaskIntoConstraints = false
+        timelineView.layer.cornerRadius = 8
+        timelineView.clipsToBounds = true
+        timelineView.update(timeline: editStore.timeline)
+        timelineView.onSeek = { [weak self] time in
+            self?.playback.seek(to: time)
+        }
+        view.addSubview(timelineView)
 
         NSLayoutConstraint.activate([
             previewCanvas.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -149,14 +164,11 @@ public final class EditorViewController: UIViewController {
             toolbarRow.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             toolbarRow.heightAnchor.constraint(equalToConstant: 36),
 
-            timelinePlaceholder.topAnchor.constraint(equalTo: toolbarRow.bottomAnchor, constant: 12),
-            timelinePlaceholder.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            timelinePlaceholder.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            timelinePlaceholder.bottomAnchor.constraint(
-                equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
-
-            timelineLabel.centerXAnchor.constraint(equalTo: timelinePlaceholder.centerXAnchor),
-            timelineLabel.centerYAnchor.constraint(equalTo: timelinePlaceholder.centerYAnchor)
+            timelineView.topAnchor.constraint(equalTo: toolbarRow.bottomAnchor, constant: 12),
+            timelineView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            timelineView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            timelineView.bottomAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16)
         ])
     }
 
