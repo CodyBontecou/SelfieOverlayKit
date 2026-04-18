@@ -163,7 +163,11 @@ final class OverlayController {
         guard let recorder else { return }
         if recorder.isRecording {
             hideConfigPanel()
-            recorder.stop(completion: nil)
+            guard let top = topViewController() else {
+                recorder.stop(completion: nil)
+                return
+            }
+            recorder.stopAndPresentEditor(from: top, completion: nil)
         } else {
             hideConfigPanel()
             recorder.start(withMicrophone: true, completion: nil)

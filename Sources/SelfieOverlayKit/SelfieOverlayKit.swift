@@ -98,12 +98,13 @@ public final class SelfieOverlayKit {
         recorder.start(withMicrophone: withMicrophone, completion: completion)
     }
 
-    /// Stops recording and persists the raw screen / camera tracks plus the
-    /// bubble timeline into a project folder. Hand the returned
-    /// `EditorProject` off to the editor (see the T7 `EditorViewController`
-    /// milestone); compositing into a shareable MP4 happens on export.
-    public func stopRecording(completion: ((Result<EditorProject, SelfieOverlayError>) -> Void)? = nil) {
-        recorder.stop(completion: completion)
+    /// Stops recording, persists a project folder with the raw screen / camera
+    /// tracks plus the bubble timeline, and presents the editor on top of
+    /// `presenter`. The completion fires with the `EditorProject` backing the
+    /// editor (or an error).
+    public func stopRecording(presenter: UIViewController,
+                              completion: ((Result<EditorProject, SelfieOverlayError>) -> Void)? = nil) {
+        recorder.stopAndPresentEditor(from: presenter, completion: completion)
     }
 }
 

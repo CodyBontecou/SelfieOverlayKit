@@ -107,6 +107,43 @@ final class RecordingController: NSObject, ObservableObject {
 
     // MARK: - Stop
 
+    /// Stops the recorders, persists a fresh project, and presents the editor
+    /// shell on top of `presenter`. The completion fires with the resulting
+    /// `EditorProject` (or an error) after the editor has been presented.
+    func stopAndPresentEditor(from presenter: UIViewController,
+                              completion: ((Result<EditorProject, SelfieOverlayError>) -> Void)?) {
+        stop { [weak self, weak presenter] result in
+            switch result {
+            case .failure(let error):
+                completion?(.failure(error))
+            case .success(let project):
+                guard let self, let presenter else {
+                    completion?(.success(project))
+                    return
+                }
+                self.presentEditor(for: project, from: presenter)
+                completion?(.success(project))
+            }
+        }
+    }
+
+    private func presentEditor(for project: EditorProject, from presenter: UIViewController) {
+        let editor: EditorViewController
+        do {
+            editor = try EditorViewController(project: project)
+        } catch {
+            DebugLog.log("pipeline", "editor init failed: \(error.localizedDescription)")
+            return
+        }
+        editor.onDismiss = { [weak self] in
+            self?.setOverlayHidden?(false)
+        }
+        let nav = UINavigationController(rootViewController: editor)
+        nav.modalPresentationStyle = .fullScreen
+        setOverlayHidden?(true)
+        presenter.present(nav, animated: true)
+    }
+
     /// Stops the recorders and moves the raw screen / camera `.mov`s plus the
     /// sampled `BubbleTimeline` into a new project folder. Hands back an
     /// `EditorProject` to the caller; compositing is deferred to preview /
