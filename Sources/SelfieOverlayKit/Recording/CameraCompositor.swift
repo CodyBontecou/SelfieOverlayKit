@@ -185,12 +185,20 @@ final class CameraCompositor {
         writer.add(videoInput)
 
         var audioInput: AVAssetWriterInput?
-        if audioOut != nil {
-            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: nil)
+        if audioOut != nil, let screenAudioTrack {
+            // Passthrough audio into an .mp4 container needs a sourceFormatHint,
+            // otherwise writer.canAdd silently refuses the input and the export
+            // comes out muted.
+            let hint = screenAudioTrack.formatDescriptions.first
+                .map { $0 as! CMFormatDescription }
+            let input = AVAssetWriterInput(
+                mediaType: .audio, outputSettings: nil, sourceFormatHint: hint)
             input.expectsMediaDataInRealTime = false
             if writer.canAdd(input) {
                 writer.add(input)
                 audioInput = input
+            } else {
+                DebugLog.log("compositor", "writer.canAdd(audio) returned false; export will be silent")
             }
         }
 
@@ -421,9 +429,13 @@ final class CameraCompositor {
 
         if snapshot.shape != .rect,
            let mask = cachedShapeMask(size: bubbleSize, shape: snapshot.shape) {
+            // CIBlendWithMask (luminance) — not CIBlendWithAlphaMask. The mask is
+            // drawn as opaque black + opaque white, so its alpha channel is a
+            // uniform 1 and CIBlendWithAlphaMask would treat it as "all foreground"
+            // and leave the bubble uncropped.
             let clear = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0))
                 .cropped(to: CGRect(origin: .zero, size: bubbleSize))
-            bubble = bubble.applyingFilter("CIBlendWithAlphaMask", parameters: [
+            bubble = bubble.applyingFilter("CIBlendWithMask", parameters: [
                 kCIInputBackgroundImageKey: clear,
                 kCIInputMaskImageKey: mask
             ])
@@ -479,8 +491,20 @@ final class CameraCompositor {
         return image
     }
 
+    // Masks and borders are built in the bubble's *pixel* coordinate space, so
+    // force a 1× renderer — otherwise UIGraphicsImageRenderer multiplies by the
+    // main-screen scale and produces a mask 3× the bubble's extent, which leaves
+    // CIBlendWithAlphaMask sampling the interior of the shape for every pixel
+    // and silently drops the rounded-corner effect from the export.
+    private static let pixelRendererFormat: UIGraphicsImageRendererFormat = {
+        let f = UIGraphicsImageRendererFormat()
+        f.scale = 1
+        f.opaque = false
+        return f
+    }()
+
     private func renderShapeMask(size: CGSize, shape: BubbleShape) -> CIImage? {
-        let renderer = UIGraphicsImageRenderer(size: size)
+        let renderer = UIGraphicsImageRenderer(size: size, format: Self.pixelRendererFormat)
         let img = renderer.image { _ in
             UIColor.black.setFill()
             UIRectFill(CGRect(origin: .zero, size: size))
@@ -498,7 +522,7 @@ final class CameraCompositor {
                               shape: BubbleShape,
                               lineWidthPx: CGFloat,
                               hue: Double) -> CIImage? {
-        let renderer = UIGraphicsImageRenderer(size: size)
+        let renderer = UIGraphicsImageRenderer(size: size, format: Self.pixelRendererFormat)
         let img = renderer.image { ctx in
             ctx.cgContext.clear(CGRect(origin: .zero, size: size))
             let color = UIColor(hue: CGFloat(hue),

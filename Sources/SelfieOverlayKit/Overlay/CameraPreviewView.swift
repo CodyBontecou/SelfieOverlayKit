@@ -12,11 +12,21 @@ final class CameraPreviewView: UIView {
         return device.map { CIContext(mtlDevice: $0) } ?? CIContext()
     }()
 
+    // Preview rendering runs off the capture delegate's queue so a slow
+    // createCGImage readback doesn't stall the AVCaptureVideoDataOutput (which
+    // has alwaysDiscardsLateVideoFrames=true and would otherwise drop frames
+    // the recorder listener is trying to consume — this is what collapsed the
+    // recorded selfie to ~7 fps before).
+    private let previewQueue = DispatchQueue(
+        label: "SelfieOverlayKit.CameraPreviewView.render", qos: .userInitiated)
+    private let inFlightLock = NSLock()
+    private var inFlight = false
+
     weak var cameraSession: CameraSession? {
         didSet {
             oldValue?.removeSampleBufferListener(self)
             cameraSession?.addSampleBufferListener(self) { [weak self] sample in
-                self?.handle(sample)
+                self?.enqueue(sample)
             }
         }
     }
@@ -33,6 +43,28 @@ final class CameraPreviewView: UIView {
 
     deinit {
         cameraSession?.removeSampleBufferListener(self)
+    }
+
+    private func enqueue(_ sampleBuffer: CMSampleBuffer) {
+        // Coalesce: if a render is already running, drop this frame. The capture
+        // output keeps delivering at 30fps; dropping preview frames keeps the
+        // render queue shallow and the session's output queue free for the
+        // recorder listener to keep up.
+        inFlightLock.lock()
+        if inFlight {
+            inFlightLock.unlock()
+            return
+        }
+        inFlight = true
+        inFlightLock.unlock()
+
+        previewQueue.async { [weak self] in
+            self?.handle(sampleBuffer)
+            guard let self else { return }
+            self.inFlightLock.lock()
+            self.inFlight = false
+            self.inFlightLock.unlock()
+        }
     }
 
     private func handle(_ sampleBuffer: CMSampleBuffer) {
