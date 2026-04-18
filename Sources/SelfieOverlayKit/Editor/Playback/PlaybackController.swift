@@ -114,11 +114,17 @@ public final class PlaybackController {
     }
 
     private func rebuildPlayerItem(preservingTime targetTime: CMTime) {
-        let output = CompositionBuilder.build(
-            timeline: editStore.timeline,
-            project: project,
-            bubbleTimeline: bubbleTimeline,
-            screenScale: screenScale)
+        let output: CompositionBuilder.Output
+        do {
+            output = try CompositionBuilder.build(
+                timeline: editStore.timeline,
+                project: project,
+                bubbleTimeline: bubbleTimeline,
+                screenScale: screenScale)
+        } catch {
+            DebugLog.log("Playback", "composition build failed — \(error.localizedDescription)")
+            return
+        }
         let item = AVPlayerItem(asset: output.composition)
         item.videoComposition = output.videoComposition
         item.audioMix = output.audioMix

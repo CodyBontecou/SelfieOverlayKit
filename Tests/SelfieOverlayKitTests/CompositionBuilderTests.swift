@@ -50,7 +50,7 @@ final class CompositionBuilderTests: XCTestCase {
         // when the screen source has audio.
         XCTAssertEqual(timeline.tracks.count, 3)
 
-        let output = CompositionBuilder.build(
+        let output = try CompositionBuilder.build(
             timeline: timeline, screenAsset: screen, cameraAsset: camera)
         let videoTracks = output.composition.tracks(withMediaType: .video)
         let audioTracks = output.composition.tracks(withMediaType: .audio)
@@ -81,7 +81,7 @@ final class CompositionBuilderTests: XCTestCase {
         timeline = timeline.settingSpeed(clipID: screenVideoTrack.clips[0].id, 2.0)
         timeline = timeline.settingSpeed(clipID: micTrack.clips[0].id, 2.0)
 
-        let output = CompositionBuilder.build(
+        let output = try CompositionBuilder.build(
             timeline: timeline, screenAsset: screen, cameraAsset: camera)
 
         // The composition has two video tracks (screen + camera) and one
@@ -113,7 +113,7 @@ final class CompositionBuilderTests: XCTestCase {
         let micClipID = timeline.tracks.first(where: { $0.kind == .audio })!.clips[0].id
         timeline = timeline.settingVolume(clipID: micClipID, 0.25)
 
-        let output = CompositionBuilder.build(
+        let output = try CompositionBuilder.build(
             timeline: timeline, screenAsset: screen, cameraAsset: camera)
 
         XCTAssertEqual(output.audioMix.inputParameters.count, 1)
@@ -134,7 +134,7 @@ final class CompositionBuilderTests: XCTestCase {
         let (_, screen, camera) = try makeAssetsAndProject(duration: t(1))
         let timeline = Timeline.fromAssets(screenAsset: screen, cameraAsset: camera)
 
-        let output = CompositionBuilder.build(
+        let output = try CompositionBuilder.build(
             timeline: timeline, screenAsset: screen, cameraAsset: camera)
         XCTAssertEqual(output.audioMix.inputParameters.first?.audioTimePitchAlgorithm, .spectral)
     }

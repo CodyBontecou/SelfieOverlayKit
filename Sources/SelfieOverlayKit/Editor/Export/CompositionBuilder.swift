@@ -26,11 +26,22 @@ public enum CompositionBuilder {
         public let audioMix: AVMutableAudioMix
     }
 
+    public enum BuildError: LocalizedError {
+        case insertFailed(clipID: UUID, underlying: Error)
+
+        public var errorDescription: String? {
+            switch self {
+            case .insertFailed(_, let underlying):
+                return "Failed to assemble clip: \(underlying.localizedDescription)"
+            }
+        }
+    }
+
     static func build(timeline: Timeline,
                       project: EditorProject,
                       bubbleTimeline: BubbleTimeline? = nil,
-                      screenScale: CGFloat = 1) -> Output {
-        build(
+                      screenScale: CGFloat = 1) throws -> Output {
+        try build(
             timeline: timeline,
             screenAsset: AVURLAsset(url: project.screenURL),
             cameraAsset: AVURLAsset(url: project.cameraURL),
@@ -44,7 +55,7 @@ public enum CompositionBuilder {
                       screenAsset: AVAsset,
                       cameraAsset: AVAsset,
                       bubbleTimeline: BubbleTimeline? = nil,
-                      screenScale: CGFloat = 1) -> Output {
+                      screenScale: CGFloat = 1) throws -> Output {
         let composition = AVMutableComposition()
 
         let sourceVideo: [SourceID: AVAssetTrack] = [
@@ -84,7 +95,7 @@ public enum CompositionBuilder {
             }
 
             for clip in track.clips {
-                insertAndScale(clip: clip, into: compTrack, from: sourceTrack)
+                try insertAndScale(clip: clip, into: compTrack, from: sourceTrack)
             }
 
             if track.kind == .audio {
@@ -114,14 +125,14 @@ public enum CompositionBuilder {
 
     private static func insertAndScale(clip: Clip,
                                        into compTrack: AVMutableCompositionTrack,
-                                       from sourceTrack: AVAssetTrack) {
+                                       from sourceTrack: AVAssetTrack) throws {
         do {
             try compTrack.insertTimeRange(
                 clip.sourceRange,
                 of: sourceTrack,
                 at: clip.timelineRange.start)
         } catch {
-            return
+            throw BuildError.insertFailed(clipID: clip.id, underlying: error)
         }
 
         guard clip.speed != 1.0 else { return }

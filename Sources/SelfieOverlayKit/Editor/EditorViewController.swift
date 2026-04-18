@@ -617,10 +617,16 @@ public final class EditorViewController: UIViewController {
 
     func exportWithProgress(showingProgress: Bool,
                             completion: @escaping (Result<URL, Error>) -> Void) {
-        let output = CompositionBuilder.build(
-            timeline: editStore.timeline,
-            project: project,
-            bubbleTimeline: bubbleTimeline)
+        let output: CompositionBuilder.Output
+        do {
+            output = try CompositionBuilder.build(
+                timeline: editStore.timeline,
+                project: project,
+                bubbleTimeline: bubbleTimeline)
+        } catch {
+            completion(.failure(error))
+            return
+        }
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("selfieoverlay-editor-\(UUID().uuidString).mp4")
         let exporter = Exporter(

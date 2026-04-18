@@ -70,7 +70,7 @@ final class BubbleVideoCompositorTests: XCTestCase {
                   borderWidth: 0, borderHue: 0)
         ])
 
-        let output = CompositionBuilder.build(
+        let output = try CompositionBuilder.build(
             timeline: timeline, screenAsset: screen, cameraAsset: camera,
             bubbleTimeline: bubble, screenScale: 1)
 
@@ -115,7 +115,7 @@ final class BubbleVideoCompositorTests: XCTestCase {
                   borderWidth: 0, borderHue: 0)
         ])
 
-        let output = CompositionBuilder.build(
+        let output = try CompositionBuilder.build(
             timeline: timeline, screenAsset: screen, cameraAsset: camera,
             bubbleTimeline: bubble, screenScale: 1)
 
@@ -159,7 +159,7 @@ final class BubbleVideoCompositorTests: XCTestCase {
                   borderWidth: 0, borderHue: 0)
         ])
 
-        let output = CompositionBuilder.build(
+        let output = try CompositionBuilder.build(
             timeline: timeline, screenAsset: screen, cameraAsset: camera,
             bubbleTimeline: bubble, screenScale: 1)
 
@@ -188,7 +188,7 @@ final class BubbleVideoCompositorTests: XCTestCase {
                   borderWidth: 0, borderHue: 0)
         ])
 
-        let output = CompositionBuilder.build(
+        let output = try CompositionBuilder.build(
             timeline: timeline, screenAsset: screen, cameraAsset: camera,
             bubbleTimeline: bubble, screenScale: 1)
         let generator = AVAssetImageGenerator(asset: output.composition)

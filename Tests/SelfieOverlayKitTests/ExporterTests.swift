@@ -41,7 +41,7 @@ final class ExporterTests: XCTestCase {
         let screen = AVURLAsset(url: project.screenURL)
         let camera = AVURLAsset(url: project.cameraURL)
         let timeline = Timeline.fromAssets(screenAsset: screen, cameraAsset: camera)
-        return CompositionBuilder.build(
+        return try CompositionBuilder.build(
             timeline: timeline, screenAsset: screen, cameraAsset: camera,
             bubbleTimeline: BubbleTimeline(snapshots: []), screenScale: 1)
     }

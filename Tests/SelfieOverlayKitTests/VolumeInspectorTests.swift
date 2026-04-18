@@ -51,7 +51,7 @@ final class VolumeInspectorTests: XCTestCase {
         let micClipID = timeline.tracks.first(where: { $0.kind == .audio })!.clips[0].id
         timeline = timeline.settingVolume(clipID: micClipID, 0)
 
-        let output = CompositionBuilder.build(
+        let output = try CompositionBuilder.build(
             timeline: timeline,
             screenAsset: screen,
             cameraAsset: camera)
