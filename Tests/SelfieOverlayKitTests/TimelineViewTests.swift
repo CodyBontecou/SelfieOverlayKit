@@ -80,6 +80,47 @@ final class TimelineViewTests: XCTestCase {
                        accuracy: 0.5)
     }
 
+    // MARK: - AC: playhead exposes adjustable VoiceOver trait and scrubs via onSeek
+
+    func testPlayheadIsAdjustableAndPublishesScrubThroughOnSeek() {
+        let view = TimelineView(frame: CGRect(x: 0, y: 0, width: 400, height: 200))
+        view.update(timeline: makeTimeline(clipDurations: [(0, 10)]))
+        view.layoutIfNeeded()
+
+        let playhead = try! XCTUnwrap(
+            view.recursiveSubviews.compactMap { $0 as? PlayheadView }.first)
+
+        XCTAssertTrue(playhead.isAccessibilityElement)
+        XCTAssertTrue(playhead.accessibilityTraits.contains(.adjustable))
+        XCTAssertEqual(playhead.accessibilityLabel, "Playhead")
+
+        view.setPlayhead(t(4))
+        XCTAssertEqual(playhead.accessibilityValue, "4 seconds of 10 seconds")
+
+        var seeked: CMTime?
+        view.onSeek = { seeked = $0 }
+
+        playhead.accessibilityIncrement()
+        XCTAssertEqual(seeked?.seconds ?? -1, 5.0, accuracy: 1e-6,
+                       "VoiceOver increment must advance 1s via onSeek")
+
+        // Simulate the PlaybackController reflecting the seek back to the UI.
+        view.setPlayhead(t(10))
+        playhead.accessibilityIncrement()
+        XCTAssertEqual(seeked?.seconds ?? -1, 10.0, accuracy: 1e-6,
+                       "scrub must clamp at the timeline duration")
+
+        playhead.accessibilityDecrement()
+        XCTAssertEqual(seeked?.seconds ?? -1, 9.0, accuracy: 1e-6)
+    }
+
+    func testPlayheadFormatsMinutesAndSeconds() {
+        XCTAssertEqual(PlayheadView.timeString(for: t(0), total: t(125)),
+                       "0 seconds of 2 minutes 5 seconds")
+        XCTAssertEqual(PlayheadView.timeString(for: t(61), total: t(125)),
+                       "1 minute 1 second of 2 minutes 5 seconds")
+    }
+
     // MARK: - AC4: clip tap triggers selection callback
 
     func testClipTapInvokesSelectionCallback() {

@@ -85,6 +85,14 @@ final class TimelineView: UIView {
         contentView.addSubview(rulerView)
         contentView.addSubview(playheadView)
 
+        rulerView.isAccessibilityElement = true
+        rulerView.accessibilityLabel = "Timeline ruler"
+        rulerView.accessibilityTraits = .header
+
+        playheadView.onAccessibilityScrub = { [weak self] time in
+            self?.onSeek?(time)
+        }
+
         // Tap on bare track-area background deselects the current clip. Per-
         // clip taps still fire their own gesture recognizers attached to the
         // ClipViews and take precedence because they're hit-tested first.
@@ -119,6 +127,7 @@ final class TimelineView: UIView {
         self.timeline = timeline
         rulerView.duration = timeline.duration
         rulerView.pixelsPerSecond = pixelsPerSecond
+        playheadView.duration = timeline.duration
         rebuildTrackRows()
         setNeedsLayout()
     }
@@ -129,6 +138,7 @@ final class TimelineView: UIView {
             x: x - 1, y: 0,
             width: 2,
             height: contentView.bounds.height)
+        playheadView.currentTime = time
     }
 
     func setSelectedClipID(_ id: UUID?) {
