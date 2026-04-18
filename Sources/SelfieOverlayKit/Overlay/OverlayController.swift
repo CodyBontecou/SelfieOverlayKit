@@ -11,6 +11,10 @@ final class OverlayController {
     /// Injected by `SelfieOverlayKit` so the inline config panel can drive recording.
     weak var recorder: RecordingController?
 
+    /// Invoked when the user taps "Turn Off Camera" in the config panel. The SDK
+    /// wires this to its public `stop()` so `isVisible` stays in sync.
+    var onTurnOffRequested: (() -> Void)?
+
     private let cameraSession = CameraSession()
     private weak var hostWindow: UIWindow?
     private var overlayWindow: PassthroughWindow?
@@ -134,6 +138,7 @@ final class OverlayController {
             settings: settingsStore,
             recorder: recorder,
             onToggleRecording: { [weak self] in self?.toggleRecording() },
+            onTurnOff: { [weak self] in self?.handleTurnOff() },
             onClose: { [weak self] in self?.hideConfigPanel() }
         )
         let host = UIHostingController(rootView: panel)
@@ -157,6 +162,15 @@ final class OverlayController {
 
     @objc private func handleDismissCatcherTap() {
         hideConfigPanel()
+    }
+
+    private func handleTurnOff() {
+        hideConfigPanel()
+        if let onTurnOffRequested {
+            onTurnOffRequested()
+        } else {
+            hide()
+        }
     }
 
     private func toggleRecording() {

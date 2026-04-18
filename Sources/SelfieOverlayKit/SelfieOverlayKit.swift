@@ -24,6 +24,9 @@ public final class SelfieOverlayKit {
             self?.controller.recordingContext()
         }
         controller.recorder = recorder
+        controller.onTurnOffRequested = { [weak self] in
+            self?.stop()
+        }
     }
 
     // MARK: - Visibility
