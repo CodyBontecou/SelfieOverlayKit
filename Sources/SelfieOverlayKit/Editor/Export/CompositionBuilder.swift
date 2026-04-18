@@ -26,18 +26,25 @@ public enum CompositionBuilder {
         public let audioMix: AVMutableAudioMix
     }
 
-    public static func build(timeline: Timeline, project: EditorProject) -> Output {
+    static func build(timeline: Timeline,
+                      project: EditorProject,
+                      bubbleTimeline: BubbleTimeline? = nil,
+                      screenScale: CGFloat = 1) -> Output {
         build(
             timeline: timeline,
             screenAsset: AVURLAsset(url: project.screenURL),
-            cameraAsset: AVURLAsset(url: project.cameraURL))
+            cameraAsset: AVURLAsset(url: project.cameraURL),
+            bubbleTimeline: bubbleTimeline,
+            screenScale: screenScale)
     }
 
     /// Asset-level entry point. Exposed so tests can build compositions from
     /// synthetic assets without roundtripping through a `ProjectStore`.
-    public static func build(timeline: Timeline,
-                             screenAsset: AVAsset,
-                             cameraAsset: AVAsset) -> Output {
+    static func build(timeline: Timeline,
+                      screenAsset: AVAsset,
+                      cameraAsset: AVAsset,
+                      bubbleTimeline: BubbleTimeline? = nil,
+                      screenScale: CGFloat = 1) -> Output {
         let composition = AVMutableComposition()
 
         let sourceVideo: [SourceID: AVAssetTrack] = [
@@ -52,6 +59,10 @@ public enum CompositionBuilder {
         ].compactMapValues { $0 }
 
         var audioMixParams: [AVMutableAudioMixInputParameters] = []
+        // Per-source-binding track IDs — startRequest uses these to pull
+        // the right source frame for the bubble compositor's instruction.
+        var videoTrackIDs: [SourceID: CMPersistentTrackID] = [:]
+        var screenClips: [Clip] = []
 
         for track in timeline.tracks {
             let sourceTrack: AVAssetTrack?
@@ -65,6 +76,13 @@ public enum CompositionBuilder {
                 withMediaType: track.kind == .video ? .video : .audio,
                 preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
 
+            if track.kind == .video {
+                videoTrackIDs[track.sourceBinding] = compTrack.trackID
+                if track.sourceBinding == .screen {
+                    screenClips = track.clips
+                }
+            }
+
             for clip in track.clips {
                 insertAndScale(clip: clip, into: compTrack, from: sourceTrack)
             }
@@ -74,8 +92,13 @@ public enum CompositionBuilder {
             }
         }
 
-        let videoComposition = makePassthroughVideoComposition(
+        let videoComposition = makeBubbleVideoComposition(
             for: composition,
+            screenClips: screenClips,
+            screenTrackID: videoTrackIDs[.screen] ?? kCMPersistentTrackID_Invalid,
+            cameraTrackID: videoTrackIDs[.camera],
+            bubbleTimeline: bubbleTimeline,
+            screenScale: screenScale,
             duration: timeline.duration,
             preferredFrameRate: sourceVideo[.screen]?.nominalFrameRate)
 
@@ -129,8 +152,13 @@ public enum CompositionBuilder {
         return params
     }
 
-    private static func makePassthroughVideoComposition(
+    private static func makeBubbleVideoComposition(
         for composition: AVMutableComposition,
+        screenClips: [Clip],
+        screenTrackID: CMPersistentTrackID,
+        cameraTrackID: CMPersistentTrackID?,
+        bubbleTimeline: BubbleTimeline?,
+        screenScale: CGFloat,
         duration: CMTime,
         preferredFrameRate: Float?
     ) -> AVMutableVideoComposition {
@@ -138,18 +166,40 @@ public enum CompositionBuilder {
         let fps = preferredFrameRate.map { Double($0) } ?? 30
         video.frameDuration = CMTime(value: 1, timescale: CMTimeScale(max(1, fps.rounded())))
 
-        let videoTracks = composition.tracks(withMediaType: .video)
-        video.renderSize = videoTracks.first?.naturalSize ?? CGSize(width: 1080, height: 1920)
+        let renderSize = composition.tracks(withMediaType: .video).first?.naturalSize
+            ?? CGSize(width: 1080, height: 1920)
+        video.renderSize = renderSize
+        video.customVideoCompositorClass = BubbleVideoCompositor.self
 
-        // Single pass-through instruction spanning the timeline.
-        let instruction = AVMutableVideoCompositionInstruction()
-        instruction.timeRange = CMTimeRange(
-            start: .zero,
-            duration: duration == .zero ? composition.duration : duration)
-        instruction.layerInstructions = videoTracks.map {
-            AVMutableVideoCompositionLayerInstruction(assetTrack: $0)
+        let totalDuration = duration == .zero ? composition.duration : duration
+
+        var instructions: [AVVideoCompositionInstructionProtocol] = []
+        if screenClips.isEmpty {
+            // No screen track — emit one full-span instruction so AVFoundation
+            // still has something to drive playback with.
+            instructions.append(BubbleCompositionInstruction(
+                timeRange: CMTimeRange(start: .zero, duration: totalDuration),
+                screenTrackID: screenTrackID,
+                cameraTrackID: cameraTrackID,
+                bubbleTimeline: bubbleTimeline,
+                sourceStart: .zero,
+                speed: 1.0,
+                screenScale: screenScale,
+                outputSize: renderSize))
+        } else {
+            for clip in screenClips {
+                instructions.append(BubbleCompositionInstruction(
+                    timeRange: clip.timelineRange,
+                    screenTrackID: screenTrackID,
+                    cameraTrackID: cameraTrackID,
+                    bubbleTimeline: bubbleTimeline,
+                    sourceStart: clip.sourceRange.start,
+                    speed: clip.speed,
+                    screenScale: screenScale,
+                    outputSize: renderSize))
+            }
         }
-        video.instructions = [instruction]
+        video.instructions = instructions
         return video
     }
 }

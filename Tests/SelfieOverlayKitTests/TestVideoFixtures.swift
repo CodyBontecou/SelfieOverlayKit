@@ -13,6 +13,7 @@ enum TestVideoFixtures {
         to url: URL,
         duration: CMTime,
         size: CGSize = CGSize(width: 64, height: 64),
+        color: (r: UInt8, g: UInt8, b: UInt8) = (0, 0, 0),
         withSilentAudio: Bool = false
     ) throws {
         try? FileManager.default.removeItem(at: url)
@@ -57,7 +58,7 @@ enum TestVideoFixtures {
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
 
-        let pixelBuffer = makeBlackPixelBuffer(size: size)
+        let pixelBuffer = makeSolidPixelBuffer(size: size, color: color)
         let fps: Int32 = 30
         let frameCount = max(1, Int(duration.seconds * Double(fps)))
         let frameDuration = CMTime(value: 1, timescale: fps)
@@ -190,7 +191,10 @@ enum TestVideoFixtures {
         }
     }
 
-    private static func makeBlackPixelBuffer(size: CGSize) -> CVPixelBuffer {
+    private static func makeSolidPixelBuffer(
+        size: CGSize,
+        color: (r: UInt8, g: UInt8, b: UInt8)
+    ) -> CVPixelBuffer {
         var pb: CVPixelBuffer?
         let attrs: CFDictionary = [
             kCVPixelBufferCGImageCompatibilityKey: true,
@@ -204,9 +208,19 @@ enum TestVideoFixtures {
             &pb)
         let buffer = pb!
         CVPixelBufferLockBaseAddress(buffer, [])
-        let base = CVPixelBufferGetBaseAddress(buffer)
+        let base = CVPixelBufferGetBaseAddress(buffer)!.assumingMemoryBound(to: UInt8.self)
         let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
-        memset(base, 0, bytesPerRow * Int(size.height))
+        let h = Int(size.height)
+        let w = Int(size.width)
+        for y in 0..<h {
+            for x in 0..<w {
+                let p = base + y * bytesPerRow + x * 4
+                p[0] = color.b
+                p[1] = color.g
+                p[2] = color.r
+                p[3] = 255
+            }
+        }
         CVPixelBufferUnlockBaseAddress(buffer, [])
         return buffer
     }

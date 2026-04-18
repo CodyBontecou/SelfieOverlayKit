@@ -59,11 +59,11 @@ final class CompositionBuilderTests: XCTestCase {
         XCTAssertEqual(audioTracks.count, 1)
         XCTAssertGreaterThan(output.composition.duration.seconds, 1.5)
 
-        // Video composition has one pass-through instruction spanning the timeline.
+        // Video composition uses the custom BubbleVideoCompositor; there is
+        // one instruction per screen-track clip (here, one full-length clip).
         XCTAssertEqual(output.videoComposition.instructions.count, 1)
-        let layers = (output.videoComposition.instructions.first as? AVMutableVideoCompositionInstruction)?
-            .layerInstructions ?? []
-        XCTAssertEqual(layers.count, 2)
+        XCTAssertTrue(output.videoComposition.instructions.first is BubbleCompositionInstruction)
+        XCTAssertTrue(output.videoComposition.customVideoCompositorClass == BubbleVideoCompositor.self)
 
         // Audio mix has one input parameters entry per audio track.
         XCTAssertEqual(output.audioMix.inputParameters.count, 1)
