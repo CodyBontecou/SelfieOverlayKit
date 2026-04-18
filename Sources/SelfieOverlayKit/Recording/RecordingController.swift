@@ -7,14 +7,14 @@ import Combine
 /// 2. `RawRecorder` writes the screen video (+ optional mic) via ReplayKit
 ///    in-app capture, while `CameraVideoRecorder` writes the raw front-camera
 ///    feed to a separate `.mov`.
-/// 3. On stop, `CameraCompositor` overlays the camera stream on top of the
-///    screen video using the bubble timeline, preserving the screen audio, and
-///    hands the resulting file to `ExportPreviewViewController`.
+/// 3. On stop, both raw `.mov`s and the sampled `BubbleTimeline` are moved
+///    into a per-recording project folder via `ProjectStore`. Compositing is
+///    deferred to preview / export so each layer stays editable.
 ///
-/// The camera is composited in post rather than relying on ReplayKit to
+/// The camera is kept as a separate track rather than relying on ReplayKit to
 /// capture the overlay window — in-app capture misses secondary windows at
-/// high `windowLevel`s, so burning the selfie in afterwards is the only way
-/// to guarantee it appears in the exported video.
+/// high `windowLevel`s, so the selfie has to be composited from its own
+/// recording afterwards (see `CameraCompositor` / the editor pipeline).
 final class RecordingController: NSObject, ObservableObject {
 
     struct RecordingContext {
@@ -26,9 +26,24 @@ final class RecordingController: NSObject, ObservableObject {
     private let raw = RawRecorder()
     private let cameraRecorder = CameraVideoRecorder()
     private let bubbleLogger = BubbleStateLogger()
+    private let projectStore: ProjectStore
 
     @Published private(set) var isRecording = false
     private var videoStartAbsTime: TimeInterval?
+
+    override init() {
+        do {
+            self.projectStore = try ProjectStore()
+        } catch {
+            fatalError("Unable to create ProjectStore: \(error)")
+        }
+        super.init()
+    }
+
+    init(projectStore: ProjectStore) {
+        self.projectStore = projectStore
+        super.init()
+    }
 
     /// Injected by `SelfieOverlayKit` so the controller can hide the live bubble while
     /// the recorded video is being previewed/edited.
@@ -90,10 +105,13 @@ final class RecordingController: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Stop + preview
+    // MARK: - Stop
 
-    func stopAndPresentPreview(from presenter: UIViewController,
-                               completion: ((Result<Void, SelfieOverlayError>) -> Void)?) {
+    /// Stops the recorders and moves the raw screen / camera `.mov`s plus the
+    /// sampled `BubbleTimeline` into a new project folder. Hands back an
+    /// `EditorProject` to the caller; compositing is deferred to preview /
+    /// export (see T5–T14 in the editor pipeline).
+    func stop(completion: ((Result<EditorProject, SelfieOverlayError>) -> Void)?) {
         guard isRecording else {
             completion?(.failure(.recordingNotInProgress))
             return
@@ -102,12 +120,7 @@ final class RecordingController: NSObject, ObservableObject {
         let videoStart = videoStartAbsTime
         let bubbleTimeline = bubbleLogger.stop(videoStartAbsTime: videoStart)
 
-        let hud = ProcessingHUDViewController()
-        presenter.present(hud, animated: true)
-
-        let screenScale = UIScreen.main.scale
-        DebugLog.log("pipeline", "stop requested; bubble snapshots=\(bubbleTimeline.snapshots.count) scale=\(screenScale)")
-        hud.setStatus("Finalizing recordings…")
+        DebugLog.log("pipeline", "stop requested; bubble snapshots=\(bubbleTimeline.snapshots.count)")
 
         let stopStart = CACurrentMediaTime()
         raw.stop { [weak self] rawResult in
@@ -124,72 +137,52 @@ final class RecordingController: NSObject, ObservableObject {
                         try? FileManager.default.removeItem(at: url)
                     }
                     DebugLog.log("pipeline", "raw.stop failed: \(error.localizedDescription)")
-                    self.finishWithError(error, hud: hud, completion: completion)
+                    self.finishWithError(error, completion: completion)
                 case (_, .failure(let error)):
                     if case .success(let url) = rawResult {
                         try? FileManager.default.removeItem(at: url)
                     }
                     DebugLog.log("pipeline", "cameraRecorder.stop failed: \(error.localizedDescription)")
-                    self.finishWithError(error, hud: hud, completion: completion)
+                    self.finishWithError(error, completion: completion)
                 case (.success(let rawURL), .success(let cameraURL)):
-                    hud.setStatus("Processing…")
-                    let compositor = CameraCompositor()
-                    compositor.onStatus = { [weak hud] phase in
-                        hud?.setStatus(phase)
-                    }
-                    compositor.onProgress = { [weak hud] progress in
-                        let suffix = progress.estimatedTotalFrames.map { "/\($0)" } ?? ""
-                        hud?.setStatus("Processing \(progress.framesProcessed)\(suffix) frames")
-                    }
-                    let inputs = CameraCompositor.Inputs(
-                        screenURL: rawURL,
-                        cameraURL: cameraURL,
-                        bubbleTimeline: bubbleTimeline,
-                        screenScale: screenScale)
-                    let composeStart = CACurrentMediaTime()
-                    compositor.composite(inputs) { [weak self] composeResult in
-                        let composeElapsed = CACurrentMediaTime() - composeStart
-                        DebugLog.log("pipeline", "composite returned after \(String(format: "%.2f", composeElapsed))s: \(String(describing: composeResult))")
-                        try? FileManager.default.removeItem(at: rawURL)
-                        try? FileManager.default.removeItem(at: cameraURL)
-                        guard let self else { return }
-                        switch composeResult {
-                        case .failure(let error):
-                            self.finishWithError(error, hud: hud, completion: completion)
-                        case .success(let finalURL):
-                            self.setRecordingOnMain(false)
-                            hud.dismiss(animated: true) {
-                                self.presentPreview(finalURL,
-                                                    from: presenter,
-                                                    completion: completion)
-                            }
-                        }
-                    }
+                    self.persistProject(rawURL: rawURL,
+                                        cameraURL: cameraURL,
+                                        bubbleTimeline: bubbleTimeline,
+                                        completion: completion)
                 }
             }
         }
     }
 
-    private func presentPreview(_ url: URL,
-                                from presenter: UIViewController,
-                                completion: ((Result<Void, SelfieOverlayError>) -> Void)?) {
-        let preview = ExportPreviewViewController(videoURL: url)
-        preview.onDismiss = { [weak self] finishedURL in
-            try? FileManager.default.removeItem(at: finishedURL)
-            self?.setOverlayHidden?(false)
-        }
-        preview.modalPresentationStyle = .fullScreen
-        setOverlayHidden?(true)
-        presenter.present(preview, animated: true) {
-            completion?(.success(()))
+    private func persistProject(rawURL: URL,
+                                cameraURL: URL,
+                                bubbleTimeline: BubbleTimeline,
+                                completion: ((Result<EditorProject, SelfieOverlayError>) -> Void)?) {
+        do {
+            let project = try projectStore.create()
+            let fm = FileManager.default
+            // Move instead of copy: the raws live in NSTemporaryDirectory
+            // and would otherwise get reaped by the OS.
+            try fm.moveItem(at: rawURL, to: project.screenURL)
+            try fm.moveItem(at: cameraURL, to: project.cameraURL)
+            try projectStore.saveBubbleTimeline(bubbleTimeline, to: project)
+            try projectStore.saveMetadata(project)
+            setRecordingOnMain(false)
+            DispatchQueue.main.async {
+                completion?(.success(project))
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: rawURL)
+            try? FileManager.default.removeItem(at: cameraURL)
+            DebugLog.log("pipeline", "persistProject failed: \(error.localizedDescription)")
+            finishWithError(error, completion: completion)
         }
     }
 
     private func finishWithError(_ error: Error,
-                                 hud: UIViewController,
-                                 completion: ((Result<Void, SelfieOverlayError>) -> Void)?) {
+                                 completion: ((Result<EditorProject, SelfieOverlayError>) -> Void)?) {
         setRecordingOnMain(false)
-        hud.dismiss(animated: true) {
+        DispatchQueue.main.async {
             if let selfieErr = error as? SelfieOverlayError {
                 completion?(.failure(selfieErr))
             } else {

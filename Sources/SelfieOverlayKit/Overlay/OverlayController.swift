@@ -162,9 +162,8 @@ final class OverlayController {
     private func toggleRecording() {
         guard let recorder else { return }
         if recorder.isRecording {
-            guard let top = topViewController() else { return }
             hideConfigPanel()
-            recorder.stopAndPresentPreview(from: top, completion: nil)
+            recorder.stop(completion: nil)
         } else {
             hideConfigPanel()
             recorder.start(withMicrophone: true, completion: nil)
