@@ -60,9 +60,13 @@ final class WaveformRenderer {
         reader.add(output)
         reader.startReading()
 
-        guard let fmt = track.formatDescriptions.first,
-              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(
-                fmt as! CMAudioFormatDescription)?.pointee else { return [] }
+        guard let first = track.formatDescriptions.first,
+              CFGetTypeID(first as CFTypeRef) == CMFormatDescriptionGetTypeID()
+        else { return [] }
+        let fmt = first as! CMFormatDescription
+        guard CMFormatDescriptionGetMediaType(fmt) == kCMMediaType_Audio,
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fmt)?.pointee
+        else { return [] }
         let sampleRate = asbd.mSampleRate
         let channels = max(1, Int(asbd.mChannelsPerFrame))
         let samplesPerPeak = max(1, Int(sampleRate / Double(peaksPerSecond)))

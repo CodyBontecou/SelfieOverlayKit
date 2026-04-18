@@ -81,6 +81,15 @@ final class ThumbnailAndWaveformTests: XCTestCase {
         }
     }
 
+    func testWaveformPeaksReturnsEmptyForAssetWithoutAudio() throws {
+        let project = try store.create()
+        try TestVideoFixtures.writeBlackMOV(to: project.screenURL, duration: t(1),
+                                            color: (0, 0, 0))
+        let asset = AVURLAsset(url: project.screenURL)
+        let peaks = try WaveformRenderer.renderPeaks(asset: asset, peaksPerSecond: 20)
+        XCTAssertTrue(peaks.isEmpty)
+    }
+
     func testWaveformCacheRoundtripsIntegers() throws {
         let project = try store.create()
         try TestVideoFixtures.writeBlackMOV(to: project.screenURL, duration: t(1),
