@@ -42,6 +42,8 @@ Add to your host app's `Info.plist`:
 <string>Shows a live selfie overlay while you use the app.</string>
 <key>NSMicrophoneUsageDescription</key>
 <string>Records audio during screen recording.</string>
+<key>NSPhotoLibraryAddUsageDescription</key>
+<string>Saves finished recordings to your photo library.</string>
 ```
 
 ## Usage

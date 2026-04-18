@@ -8,17 +8,21 @@ final class BubbleView: UIView {
 
     private let previewView = CameraPreviewView()
     private let settings: SettingsStore
-    private weak var session: AVCaptureSession?
+    private weak var cameraSession: CameraSession?
 
     private var panStart: CGPoint = .zero
     private var pinchStartSize: CGFloat = 0
     private var cancellables = Set<AnyCancellable>()
 
-    /// Called when the user long-presses the bubble. Host app should present settings.
-    var onRequestSettings: (() -> Void)?
+    /// Called when the user taps the bubble. Host controller toggles the inline config panel.
+    var onRequestConfig: (() -> Void)?
 
-    init(session: AVCaptureSession, settings: SettingsStore) {
-        self.session = session
+    /// Called when the user starts a pan or pinch on the bubble, so the controller can
+    /// dismiss the config panel to keep it from drifting away from the bubble.
+    var onInteractionBegan: (() -> Void)?
+
+    init(cameraSession: CameraSession, settings: SettingsStore) {
+        self.cameraSession = cameraSession
         self.settings = settings
         super.init(frame: CGRect(origin: settings.position,
                                  size: CGSize(width: settings.size, height: settings.size)))
@@ -30,7 +34,7 @@ final class BubbleView: UIView {
         observeSettings()
         attachGestures()
         accessibilityLabel = "Selfie camera"
-        accessibilityHint = "Drag to move, pinch to resize, double-tap to change shape, long-press for settings."
+        accessibilityHint = "Drag to move, pinch to resize, tap to show settings."
         isAccessibilityElement = true
     }
 
@@ -41,7 +45,7 @@ final class BubbleView: UIView {
 
     private func setupSubviews() {
         layer.masksToBounds = true
-        previewView.session = session
+        previewView.cameraSession = cameraSession
         previewView.frame = bounds
         previewView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(previewView)
@@ -125,13 +129,8 @@ final class BubbleView: UIView {
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
         addGestureRecognizer(pinch)
 
-        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
-        doubleTap.numberOfTapsRequired = 2
-        addGestureRecognizer(doubleTap)
-
-        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
-        longPress.minimumPressDuration = 0.45
-        addGestureRecognizer(longPress)
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+        addGestureRecognizer(tap)
     }
 
     @objc private func handlePan(_ gr: UIPanGestureRecognizer) {
@@ -139,6 +138,7 @@ final class BubbleView: UIView {
         switch gr.state {
         case .began:
             panStart = center
+            onInteractionBegan?()
         case .changed:
             let t = gr.translation(in: superview)
             center = clampedCenter(CGPoint(x: panStart.x + t.x, y: panStart.y + t.y),
@@ -155,6 +155,7 @@ final class BubbleView: UIView {
         switch gr.state {
         case .began:
             pinchStartSize = settings.size
+            onInteractionBegan?()
         case .changed:
             let proposed = pinchStartSize * gr.scale
             let clamped = max(80, min(proposed, 320))
@@ -170,17 +171,8 @@ final class BubbleView: UIView {
         }
     }
 
-    @objc private func handleDoubleTap() {
-        let all = BubbleShape.allCases
-        let idx = all.firstIndex(of: settings.shape) ?? 0
-        settings.shape = all[(idx + 1) % all.count]
-    }
-
-    @objc private func handleLongPress(_ gr: UILongPressGestureRecognizer) {
-        guard gr.state == .began else { return }
-        let gen = UIImpactFeedbackGenerator(style: .medium)
-        gen.impactOccurred()
-        onRequestSettings?()
+    @objc private func handleTap() {
+        onRequestConfig?()
     }
 
     // MARK: - Layout helpers

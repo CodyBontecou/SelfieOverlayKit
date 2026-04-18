@@ -15,7 +15,15 @@ public final class SelfieOverlayKit {
 
     public private(set) var isVisible: Bool = false
 
-    private init() {}
+    private init() {
+        recorder.setOverlayHidden = { [weak self] hidden in
+            self?.controller.setBubbleHidden(hidden)
+        }
+        recorder.recordingContextProvider = { [weak self] in
+            self?.controller.recordingContext()
+        }
+        controller.recorder = recorder
+    }
 
     // MARK: - Visibility
 
