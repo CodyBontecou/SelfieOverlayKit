@@ -7,9 +7,9 @@ import Foundation
 ///
 /// Kept pure (no UIKit / AVFoundation) so it can be unit-tested without the
 /// live camera stack.
-struct BubbleTimeline {
+struct BubbleTimeline: Codable, Equatable {
 
-    struct Snapshot: Equatable {
+    struct Snapshot: Codable, Equatable {
         /// Seconds relative to video start (first screen sample PTS).
         let time: TimeInterval
         /// Bubble frame in screen *points* (top-left origin).
