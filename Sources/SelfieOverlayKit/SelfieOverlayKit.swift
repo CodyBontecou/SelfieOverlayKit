@@ -12,6 +12,7 @@ public final class SelfieOverlayKit {
 
     private let controller = OverlayController()
     private let recorder = RecordingController()
+    private let summonGesture = SummonGestureController()
 
     public private(set) var isVisible: Bool = false
 
@@ -56,6 +57,24 @@ public final class SelfieOverlayKit {
         } else {
             start(completion: completion)
         }
+    }
+
+    // MARK: - Summon gesture
+
+    /// Installs a global tap gesture on the host app's key window that toggles the
+    /// bubble. Defaults to a triple-tap with two fingers. The gesture is observational
+    /// (`cancelsTouchesInView = false`) so it does not interfere with the host UI.
+    ///
+    /// Call once at launch — e.g. from `SceneDelegate.scene(_:willConnectTo:options:)`
+    /// or the SwiftUI `App`'s `init`.
+    public func enableSummonGesture(taps: Int = 3, touches: Int = 2) {
+        summonGesture.enable(taps: taps, touches: touches) { [weak self] in
+            self?.toggle()
+        }
+    }
+
+    public func disableSummonGesture() {
+        summonGesture.disable()
     }
 
     // MARK: - Settings
