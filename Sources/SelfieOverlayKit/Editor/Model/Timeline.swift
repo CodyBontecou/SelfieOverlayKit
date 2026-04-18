@@ -93,10 +93,17 @@ public struct Timeline: Hashable {
         return copy
     }
 
+    /// Clip volume range — unity at 1.0, up to 2.0 for amplification. The
+    /// inspector UI (T13) surfaces this as a 0%–200% slider; AVAudioMix
+    /// accepts values beyond 1.0 so we don't saturate at unity.
+    public static let volumeRange: ClosedRange<Float> = 0.0...2.0
+
     public func settingVolume(clipID: UUID, _ volume: Float) -> Timeline {
         guard let loc = locate(clipID: clipID) else { return self }
         var copy = self
-        copy.tracks[loc.trackIndex].clips[loc.clipIndex].volume = max(0, min(1, volume))
+        let clamped = min(max(Timeline.volumeRange.lowerBound, volume),
+                          Timeline.volumeRange.upperBound)
+        copy.tracks[loc.trackIndex].clips[loc.clipIndex].volume = clamped
         return copy
     }
 

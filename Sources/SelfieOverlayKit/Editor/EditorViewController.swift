@@ -167,6 +167,9 @@ public final class EditorViewController: UIViewController {
         inspector.onSpeedCommit = { [weak self] speed in
             self?.commitSpeed(speed)
         }
+        inspector.onVolumeCommit = { [weak self] volume in
+            self?.commitVolume(volume)
+        }
         view.addSubview(inspector)
 
         NSLayoutConstraint.activate([
@@ -238,14 +241,20 @@ public final class EditorViewController: UIViewController {
             inspector.isHidden = true
             return
         }
-        let clip = editStore.timeline.tracks[loc.trackIndex].clips[loc.clipIndex]
-        inspector.configure(with: clip)
+        let track = editStore.timeline.tracks[loc.trackIndex]
+        let clip = track.clips[loc.clipIndex]
+        inspector.configure(with: clip, trackKind: track.kind)
         inspector.isHidden = false
     }
 
     private func commitSpeed(_ speed: Double) {
         guard let clipID = timelineView.selectedClipID else { return }
         editStore.apply(name: "Speed") { $0.settingPairedSpeed(clipID: clipID, speed) }
+    }
+
+    private func commitVolume(_ volume: Float) {
+        guard let clipID = timelineView.selectedClipID else { return }
+        editStore.apply(name: "Volume") { $0.settingVolume(clipID: clipID, volume) }
     }
 
     @objc func didTapSplit() {

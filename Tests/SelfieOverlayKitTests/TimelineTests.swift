@@ -156,10 +156,11 @@ final class TimelineTests: XCTestCase {
         XCTAssertEqual(out.tracks[0].clips[0].volume, 0.4, accuracy: 1e-6)
     }
 
-    func testSettingVolumeClampsToUnitRange() {
+    func testSettingVolumeClampsToRange() {
         let tl = makeTimeline()
         let clip = tl.tracks[0].clips[0]
         XCTAssertEqual(tl.settingVolume(clipID: clip.id, -1).tracks[0].clips[0].volume, 0.0)
-        XCTAssertEqual(tl.settingVolume(clipID: clip.id, 2.5).tracks[0].clips[0].volume, 1.0)
+        XCTAssertEqual(tl.settingVolume(clipID: clip.id, 2.5).tracks[0].clips[0].volume, 2.0)
+        XCTAssertEqual(tl.settingVolume(clipID: clip.id, 1.5).tracks[0].clips[0].volume, 1.5)
     }
 }
