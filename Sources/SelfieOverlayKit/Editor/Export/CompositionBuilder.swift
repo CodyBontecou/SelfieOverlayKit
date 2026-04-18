@@ -63,10 +63,16 @@ public enum CompositionBuilder {
             .camera: cameraAsset.tracks(withMediaType: .video).first
         ].compactMapValues { $0 }
 
+        // ReplayKit normally embeds mic audio in the screen .mov, so .mic
+        // defaults to that track. When the screen capture has no audio (mic
+        // was denied, or the session is screen-only) the camera .mov still
+        // carries mic audio from the AVCaptureSession, so fall back there
+        // rather than silently dropping the mic track.
         let sourceAudio: [SourceID: AVAssetTrack] = [
             .screen: screenAsset.tracks(withMediaType: .audio).first,
             .camera: cameraAsset.tracks(withMediaType: .audio).first,
             .mic: screenAsset.tracks(withMediaType: .audio).first
+                ?? cameraAsset.tracks(withMediaType: .audio).first
         ].compactMapValues { $0 }
 
         var audioMixParams: [AVMutableAudioMixInputParameters] = []

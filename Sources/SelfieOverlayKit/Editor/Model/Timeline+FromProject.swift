@@ -44,10 +44,14 @@ public extension Timeline {
             timelineStart: .zero)
         tracks.append(Track(kind: .video, sourceBinding: .camera, clips: [cameraVideo]))
 
-        // Screen audio (tagged as .mic since ReplayKit embeds the microphone
-        // track into the screen .mov). A future ticket can split "app audio"
-        // and "mic audio" if the ReplayKit input exposes them separately.
-        if !screenAsset.tracks(withMediaType: .audio).isEmpty {
+        // Mic audio normally lives in the screen .mov (ReplayKit embeds it
+        // there). When screen capture has no audio, the camera .mov carries
+        // the mic audio from the AVCaptureSession instead — seed the mic
+        // track from whichever asset has audio so "no audio on screen" does
+        // not silently drop the mic.
+        let screenHasAudio = !screenAsset.tracks(withMediaType: .audio).isEmpty
+        let cameraHasAudio = !cameraAsset.tracks(withMediaType: .audio).isEmpty
+        if screenHasAudio || cameraHasAudio {
             let micClip = Clip.stretched(
                 sourceID: .mic,
                 sourceRange: CMTimeRange(start: .zero, duration: shortest),

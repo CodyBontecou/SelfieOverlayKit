@@ -45,4 +45,36 @@ final class TimelineFromProjectTests: XCTestCase {
             XCTAssertEqual(track.clips[0].timelineRange.duration.seconds, 2.0, accuracy: 0.1)
         }
     }
+
+    func testMicTrackSeededWhenOnlyCameraHasAudio() throws {
+        let project = try store.create()
+        // Silent screen, camera with audio — a realistic "mic denied on
+        // screen capture but granted on camera capture" pairing.
+        try TestVideoFixtures.writeBlackMOV(
+            to: project.screenURL,
+            duration: CMTime(seconds: 1, preferredTimescale: 600))
+        try TestVideoFixtures.writeBlackMOV(
+            to: project.cameraURL,
+            duration: CMTime(seconds: 1, preferredTimescale: 600),
+            withSilentAudio: true)
+
+        let timeline = Timeline.fromProject(project)
+        let micTracks = timeline.tracks.filter { $0.kind == .audio && $0.sourceBinding == .mic }
+        XCTAssertEqual(micTracks.count, 1,
+                       "mic track must be seeded when camera carries mic audio")
+    }
+
+    func testNoMicTrackWhenNeitherAssetHasAudio() throws {
+        let project = try store.create()
+        try TestVideoFixtures.writeBlackMOV(
+            to: project.screenURL,
+            duration: CMTime(seconds: 1, preferredTimescale: 600))
+        try TestVideoFixtures.writeBlackMOV(
+            to: project.cameraURL,
+            duration: CMTime(seconds: 1, preferredTimescale: 600))
+
+        let timeline = Timeline.fromProject(project)
+        XCTAssertFalse(timeline.tracks.contains(where: { $0.kind == .audio }),
+                       "no audio track expected when neither source has audio")
+    }
 }

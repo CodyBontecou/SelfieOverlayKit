@@ -138,4 +138,28 @@ final class CompositionBuilderTests: XCTestCase {
             timeline: timeline, screenAsset: screen, cameraAsset: camera)
         XCTAssertEqual(output.audioMix.inputParameters.first?.audioTimePitchAlgorithm, .spectral)
     }
+
+    /// Regression: when the screen .mov is silent (mic denied on ReplayKit
+    /// side), the camera .mov still carries mic audio from AVCaptureSession.
+    /// CompositionBuilder must pull .mic audio from camera rather than
+    /// silently dropping the track.
+    func testMicAudioFallsBackToCameraWhenScreenIsSilent() throws {
+        let project = try store.create()
+        try TestVideoFixtures.writeBlackMOV(
+            to: project.screenURL, duration: t(1))                         // no audio
+        try TestVideoFixtures.writeBlackMOV(
+            to: project.cameraURL, duration: t(1), withSilentAudio: true)  // audio
+        let screen = AVURLAsset(url: project.screenURL)
+        let camera = AVURLAsset(url: project.cameraURL)
+
+        let timeline = Timeline.fromAssets(screenAsset: screen, cameraAsset: camera)
+        XCTAssertTrue(timeline.tracks.contains(where: { $0.kind == .audio }),
+                      "fromAssets must seed a mic track when camera has audio")
+
+        let output = try CompositionBuilder.build(
+            timeline: timeline, screenAsset: screen, cameraAsset: camera)
+        XCTAssertEqual(output.composition.tracks(withMediaType: .audio).count, 1,
+                       "mic track must survive composition build with silent screen")
+        XCTAssertEqual(output.audioMix.inputParameters.count, 1)
+    }
 }
