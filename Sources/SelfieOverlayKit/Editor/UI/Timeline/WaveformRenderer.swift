@@ -49,6 +49,7 @@ final class WaveformRenderer {
     static func renderPeaks(asset: AVAsset, peaksPerSecond: Int) throws -> [Float] {
         guard let track = asset.tracks(withMediaType: .audio).first else { return [] }
         let reader = try AVAssetReader(asset: asset)
+        defer { reader.cancelReading() }
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVLinearPCMBitDepthKey: 16,
