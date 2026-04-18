@@ -26,6 +26,8 @@ public struct SelfieOverlaySettingsView: View {
                 Section("Appearance") {
                     Toggle("Mirror (selfie view)", isOn: $settings.mirror)
 
+                    Toggle("Hide during recording", isOn: $settings.hideDuringRecording)
+
                     VStack(alignment: .leading) {
                         HStack {
                             Text("Opacity")

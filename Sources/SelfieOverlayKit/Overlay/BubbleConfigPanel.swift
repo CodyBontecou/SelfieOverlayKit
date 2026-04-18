@@ -18,6 +18,9 @@ struct BubbleConfigPanel: View {
             Toggle("Mirror", isOn: $settings.mirror)
                 .font(.subheadline)
 
+            Toggle("Hide during recording", isOn: $settings.hideDuringRecording)
+                .font(.subheadline)
+
             slider(title: "Opacity",
                    value: $settings.opacity,
                    range: 0.2...1.0,

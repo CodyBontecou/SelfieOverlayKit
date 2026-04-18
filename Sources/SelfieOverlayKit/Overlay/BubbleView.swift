@@ -8,19 +8,34 @@ final class BubbleView: UIView {
 
     private let previewView = CameraPreviewView()
     private let recordingIndicator = RecordingIndicatorView()
+    private let stealthStopView = StealthStopView()
     private let settings: SettingsStore
     private weak var cameraSession: CameraSession?
 
     private var panStart: CGPoint = .zero
     private var pinchStartSize: CGFloat = 0
     private var cancellables = Set<AnyCancellable>()
+    private(set) var stealthActive = false
+    private var savedCornerRadius: CGFloat = 0
+    private var savedBorderWidth: CGFloat = 0
+    private var savedBorderColor: CGColor?
+    private var savedBounds: CGRect = .zero
+
+    /// Fixed side length of the stealth stop affordance. Kept small so a user with a
+    /// large bubble doesn't suddenly get a big red disc covering their content.
+    private static let stealthSize: CGFloat = 56
 
     /// Called when the user taps the bubble. Host controller toggles the radial action ring.
+    /// Not fired while stealth recording is active — `onStealthStopTap` fires instead.
     var onTap: (() -> Void)?
 
     /// Called when the user starts a pan or pinch on the bubble, so the controller can
     /// dismiss any open affordance (action ring, config panel) before it drifts.
     var onInteractionBegan: (() -> Void)?
+
+    /// Called when the user taps the bubble while it's in stealth-recording mode.
+    /// Host controller uses this to stop recording and present the editor.
+    var onStealthStopTap: (() -> Void)?
 
     init(cameraSession: CameraSession, settings: SettingsStore) {
         self.cameraSession = cameraSession
@@ -54,11 +69,61 @@ final class BubbleView: UIView {
         recordingIndicator.isHidden = true
         addSubview(recordingIndicator)
 
+        stealthStopView.isHidden = true
+        stealthStopView.frame = bounds
+        stealthStopView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(stealthStopView)
+
         // Subtle drop shadow on a container layer (we can't shadow a masked layer).
         layer.shadowColor = UIColor.black.cgColor
         layer.shadowOpacity = 0.25
         layer.shadowRadius = 8
         layer.shadowOffset = CGSize(width: 0, height: 4)
+    }
+
+    /// Swap the camera preview for a small draggable stop-recording affordance. Used
+    /// when the user enabled "Hide during recording" in settings — the selfie feed is
+    /// still being captured to disk for the editor, but the live UI is suppressed.
+    func setStealthActive(_ active: Bool) {
+        guard stealthActive != active else { return }
+        stealthActive = active
+        if active {
+            savedCornerRadius = layer.cornerRadius
+            savedBorderWidth = layer.borderWidth
+            savedBorderColor = layer.borderColor
+            savedBounds = bounds
+            previewView.isHidden = true
+            recordingIndicator.isHidden = true
+            stealthStopView.isHidden = false
+            alpha = 1
+            backgroundColor = .clear
+            let side = Self.stealthSize
+            let centerBefore = center
+            bounds = CGRect(x: 0, y: 0, width: side, height: side)
+            center = centerBefore
+            layer.cornerRadius = side / 2
+            layer.borderWidth = 0
+            layer.borderColor = UIColor.clear.cgColor
+            layer.shadowPath = UIBezierPath(ovalIn: bounds).cgPath
+            if let superview {
+                center = clampedCenter(center, in: superview.bounds)
+            }
+        } else {
+            previewView.isHidden = false
+            stealthStopView.isHidden = true
+            backgroundColor = nil
+            let centerBefore = center
+            bounds = savedBounds
+            center = centerBefore
+            layer.cornerRadius = savedCornerRadius
+            layer.borderWidth = savedBorderWidth
+            layer.borderColor = savedBorderColor
+            layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: layer.cornerRadius).cgPath
+            if let superview {
+                center = clampedCenter(center, in: superview.bounds)
+            }
+            applyCurrentSettings()
+        }
     }
 
     /// Shows/hides the pulsing red recording indicator in the bubble's top-right
@@ -79,6 +144,9 @@ final class BubbleView: UIView {
     }
 
     private func applyCurrentSettings() {
+        // While stealth-recording the bubble is a fixed stop affordance, so keep its
+        // appearance locked. The saved shape/size is restored on `setStealthActive(false)`.
+        guard !stealthActive else { return }
         applySettings(shape: settings.shape,
                       mirror: settings.mirror,
                       opacity: settings.opacity,
@@ -128,8 +196,14 @@ final class BubbleView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         previewView.frame = bounds
+        stealthStopView.frame = bounds
         layoutRecordingIndicator()
-        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: layer.cornerRadius).cgPath
+        if stealthActive {
+            layer.cornerRadius = bounds.width / 2
+            layer.shadowPath = UIBezierPath(ovalIn: bounds).cgPath
+        } else {
+            layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: layer.cornerRadius).cgPath
+        }
     }
 
     private func layoutRecordingIndicator() {
@@ -198,7 +272,11 @@ final class BubbleView: UIView {
     }
 
     @objc private func handleTap() {
-        onTap?()
+        if stealthActive {
+            onStealthStopTap?()
+        } else {
+            onTap?()
+        }
     }
 
     // MARK: - Layout helpers

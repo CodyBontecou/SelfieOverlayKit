@@ -29,6 +29,7 @@ public final class SettingsStore: ObservableObject {
         static let positionY = "SelfieOverlay.positionY"
         static let borderWidth = "SelfieOverlay.borderWidth"
         static let borderHue = "SelfieOverlay.borderHue"
+        static let hideDuringRecording = "SelfieOverlay.hideDuringRecording"
     }
 
     private let defaults: UserDefaults
@@ -69,6 +70,13 @@ public final class SettingsStore: ObservableObject {
         didSet { defaults.set(borderHue, forKey: Key.borderHue) }
     }
 
+    /// When true, the bubble is replaced by a small stop-recording affordance while
+    /// recording. The selfie camera feed and bubble timeline still get captured so
+    /// the editor can show the selfie in the exported video.
+    @Published public var hideDuringRecording: Bool {
+        didSet { defaults.set(hideDuringRecording, forKey: Key.hideDuringRecording) }
+    }
+
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
 
@@ -86,6 +94,7 @@ public final class SettingsStore: ObservableObject {
 
         self.borderWidth = CGFloat(defaults.object(forKey: Key.borderWidth) as? Double ?? 2)
         self.borderHue = defaults.object(forKey: Key.borderHue) as? Double ?? 0.58
+        self.hideDuringRecording = defaults.object(forKey: Key.hideDuringRecording) as? Bool ?? false
     }
 
     /// Reset all settings to defaults.
@@ -97,5 +106,6 @@ public final class SettingsStore: ObservableObject {
         position = CGPoint(x: UIScreen.main.bounds.width - 140 - 16, y: 80)
         borderWidth = 2
         borderHue = 0.58
+        hideDuringRecording = false
     }
 }

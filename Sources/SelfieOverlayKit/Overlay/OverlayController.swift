@@ -68,6 +68,9 @@ final class OverlayController {
             self?.hideActionRing()
             self?.hideConfigPanel()
         }
+        bubble.onStealthStopTap = { [weak self] in
+            self?.stopRecordingFromStealth()
+        }
         root.view.addSubview(bubble)
 
         self.bubble = bubble
@@ -81,7 +84,15 @@ final class OverlayController {
         recorderCancellable = recorder?.$isRecording
             .receive(on: RunLoop.main)
             .sink { [weak self] isRecording in
-                self?.bubble?.setRecordingIndicatorVisible(isRecording)
+                guard let self else { return }
+                self.bubble?.setRecordingIndicatorVisible(isRecording)
+                if isRecording {
+                    if self.settingsStore.hideDuringRecording {
+                        self.setStealthActive(true)
+                    }
+                } else {
+                    self.setStealthActive(false)
+                }
             }
     }
 
@@ -108,12 +119,15 @@ final class OverlayController {
     }
 
     /// Temporarily hide the bubble without tearing down state (position, session, window).
-    /// Used while the recording preview/edit screen is showing.
+    /// Used while the recording preview/edit screen is showing. Also restores the bubble
+    /// to its normal (non-stealth) appearance while it's hidden, so that re-showing it
+    /// after the editor is dismissed always brings back the full camera preview.
     func setBubbleHidden(_ hidden: Bool) {
         guard let overlayWindow else { return }
         if hidden {
             hideActionRing(animated: false)
             hideConfigPanel()
+            bubble?.setStealthActive(false)
         }
         overlayWindow.isHidden = hidden
         if hidden {
@@ -121,6 +135,27 @@ final class OverlayController {
         } else {
             cameraSession.start()
         }
+    }
+
+    /// Swap the bubble for a tiny stop-recording affordance while recording, so the
+    /// live camera preview is not visible on screen. The camera session and bubble
+    /// state logger keep running, so the editor still gets the full selfie track.
+    func setStealthActive(_ active: Bool) {
+        guard let bubble else { return }
+        if active {
+            hideActionRing(animated: false)
+            hideConfigPanel()
+        }
+        bubble.setStealthActive(active)
+    }
+
+    private func stopRecordingFromStealth() {
+        guard let recorder, recorder.isRecording else { return }
+        guard let top = topViewController() else {
+            recorder.stop(completion: nil)
+            return
+        }
+        recorder.stopAndPresentEditor(from: top, completion: nil)
     }
 
     // MARK: - Settings sheet
