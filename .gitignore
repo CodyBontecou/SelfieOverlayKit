@@ -24,3 +24,8 @@ Package.resolved
 *.ipa
 *.dSYM.zip
 *.dSYM
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key

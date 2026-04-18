@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "ios_selfie_sdk",
+  "project_id": "466941a0-7c3f-4279-8017-834dc54d3a62"
+}
