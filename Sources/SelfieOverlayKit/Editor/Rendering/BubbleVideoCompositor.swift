@@ -14,8 +14,9 @@ import Metal
 ///   single serial `renderQueue`, which serializes access to `renderContext`
 ///   and the shared `BubbleOverlayRenderer`'s mask / border caches.
 /// - `renderContextChanged` can fire mid-playback on seek or composition
-///   swap; guarded by the same `renderLock` so startRequest always reads a
-///   consistent render context.
+///   swap; it also hops to `renderQueue`, so context swaps serialize behind
+///   any in-flight request rather than racing the pool the request allocated
+///   against.
 /// - Source pixel buffers from `request.sourceFrame(byTrackID:)` are used
 ///   only within the request closure and never retained across requests.
 public final class BubbleVideoCompositor: NSObject, AVVideoCompositing {
@@ -32,7 +33,6 @@ public final class BubbleVideoCompositor: NSObject, AVVideoCompositing {
 
     private let renderQueue = DispatchQueue(
         label: "SelfieOverlayKit.BubbleVideoCompositor", qos: .userInitiated)
-    private let renderLock = NSLock()
     private var renderContext: AVVideoCompositionRenderContext?
 
     private let renderer = BubbleOverlayRenderer()
@@ -48,9 +48,9 @@ public final class BubbleVideoCompositor: NSObject, AVVideoCompositing {
     // MARK: - AVVideoCompositing
 
     public func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {
-        renderLock.lock()
-        self.renderContext = newRenderContext
-        renderLock.unlock()
+        renderQueue.async { [weak self] in
+            self?.renderContext = newRenderContext
+        }
     }
 
     public func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {
@@ -86,11 +86,7 @@ public final class BubbleVideoCompositor: NSObject, AVVideoCompositing {
 
         let state = bubbleState(for: request, instruction: instruction)
 
-        renderLock.lock()
-        let context = renderContext
-        renderLock.unlock()
-
-        guard let context else {
+        guard let context = renderContext else {
             request.finish(with: CompositorError.missingRenderContext)
             return
         }
