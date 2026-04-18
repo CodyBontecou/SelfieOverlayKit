@@ -61,23 +61,7 @@ final class CameraCompositor {
     private let audioQueue = DispatchQueue(
         label: "SelfieOverlayKit.CameraCompositor.audio", qos: .userInitiated)
 
-    // Shape masks and border overlays change only when the bubble resizes or
-    // switches shape, so cache them to avoid re-rendering every frame.
-    private struct ShapeKey: Hashable {
-        let width: Int
-        let height: Int
-        let shape: BubbleShape
-    }
-    private var maskCache: [ShapeKey: CIImage] = [:]
-
-    private struct BorderKey: Hashable {
-        let width: Int
-        let height: Int
-        let shape: BubbleShape
-        let lineWidthQuantized: Int
-        let hueQuantized: Int
-    }
-    private var borderCache: [BorderKey: CIImage] = [:]
+    private let overlayRenderer = BubbleOverlayRenderer()
 
     func composite(_ inputs: Inputs,
                    completion: @escaping (Result<URL, Error>) -> Void) {
@@ -436,179 +420,13 @@ final class CameraCompositor {
                              screenScale: CGFloat,
                              into outputBuffer: CVPixelBuffer,
                              outputSize: CGSize) {
-        let screenImage = CIImage(cvPixelBuffer: screenBuffer)
-        var composite = screenImage
-
-        if let snapshot, let cameraBuffer {
-            let cameraImage = CIImage(cvPixelBuffer: cameraBuffer)
-            if let bubble = makeBubbleImage(
-                camera: cameraImage,
-                snapshot: snapshot,
-                screenScale: screenScale,
-                outputSize: outputSize) {
-                composite = bubble.composited(over: screenImage)
-            }
-        }
-
-        ciContext.render(
-            composite,
-            to: outputBuffer,
-            bounds: CGRect(origin: .zero, size: outputSize),
-            colorSpace: CGColorSpaceCreateDeviceRGB())
-    }
-
-    private func makeBubbleImage(camera: CIImage,
-                                 snapshot: BubbleTimeline.Snapshot,
-                                 screenScale: CGFloat,
-                                 outputSize: CGSize) -> CIImage? {
-        let widthPx = (snapshot.frame.width * screenScale).rounded()
-        let heightPx = (snapshot.frame.height * screenScale).rounded()
-        guard widthPx > 1, heightPx > 1 else { return nil }
-
-        let camExtent = camera.extent
-        guard camExtent.width > 0, camExtent.height > 0 else { return nil }
-
-        let fillScale = max(widthPx / camExtent.width, heightPx / camExtent.height)
-        var bubble = camera.transformed(by: CGAffineTransform(scaleX: fillScale, y: fillScale))
-
-        let scaledExtent = bubble.extent
-        let cropX = scaledExtent.minX + (scaledExtent.width - widthPx) / 2
-        let cropY = scaledExtent.minY + (scaledExtent.height - heightPx) / 2
-        let cropRect = CGRect(x: cropX, y: cropY, width: widthPx, height: heightPx)
-        bubble = bubble
-            .cropped(to: cropRect)
-            .transformed(by: CGAffineTransform(translationX: -cropRect.minX,
-                                               y: -cropRect.minY))
-
-        if snapshot.mirror {
-            bubble = bubble
-                .transformed(by: CGAffineTransform(scaleX: -1, y: 1))
-                .transformed(by: CGAffineTransform(translationX: widthPx, y: 0))
-        }
-
-        let bubbleSize = CGSize(width: widthPx, height: heightPx)
-
-        if snapshot.shape != .rect,
-           let mask = cachedShapeMask(size: bubbleSize, shape: snapshot.shape) {
-            // CIBlendWithMask (luminance) — not CIBlendWithAlphaMask. The mask is
-            // drawn as opaque black + opaque white, so its alpha channel is a
-            // uniform 1 and CIBlendWithAlphaMask would treat it as "all foreground"
-            // and leave the bubble uncropped.
-            let clear = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0))
-                .cropped(to: CGRect(origin: .zero, size: bubbleSize))
-            bubble = bubble.applyingFilter("CIBlendWithMask", parameters: [
-                kCIInputBackgroundImageKey: clear,
-                kCIInputMaskImageKey: mask
-            ])
-        }
-
-        if snapshot.opacity < 0.999 {
-            bubble = bubble.applyingFilter("CIColorMatrix", parameters: [
-                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(snapshot.opacity))
-            ])
-        }
-
-        if snapshot.borderWidth > 0,
-           let border = cachedBorder(size: bubbleSize,
-                                     shape: snapshot.shape,
-                                     lineWidthPx: snapshot.borderWidth * screenScale,
-                                     hue: snapshot.borderHue) {
-            bubble = border.composited(over: bubble)
-        }
-
-        let tx = snapshot.frame.origin.x * screenScale
-        let ty = outputSize.height - (snapshot.frame.origin.y + snapshot.frame.height) * screenScale
-        bubble = bubble.transformed(by: CGAffineTransform(translationX: tx, y: ty))
-
-        return bubble
-    }
-
-    // MARK: - Mask / border caches
-
-    private func cachedShapeMask(size: CGSize, shape: BubbleShape) -> CIImage? {
-        let key = ShapeKey(width: Int(size.width), height: Int(size.height), shape: shape)
-        if let cached = maskCache[key] { return cached }
-        guard let image = renderShapeMask(size: size, shape: shape) else { return nil }
-        maskCache[key] = image
-        return image
-    }
-
-    private func cachedBorder(size: CGSize,
-                              shape: BubbleShape,
-                              lineWidthPx: CGFloat,
-                              hue: Double) -> CIImage? {
-        let key = BorderKey(
-            width: Int(size.width),
-            height: Int(size.height),
-            shape: shape,
-            lineWidthQuantized: Int(lineWidthPx.rounded()),
-            hueQuantized: Int((hue * 360).rounded()))
-        if let cached = borderCache[key] { return cached }
-        guard let image = renderBorder(size: size,
-                                       shape: shape,
-                                       lineWidthPx: lineWidthPx,
-                                       hue: hue) else { return nil }
-        borderCache[key] = image
-        return image
-    }
-
-    // Masks and borders are built in the bubble's *pixel* coordinate space, so
-    // force a 1× renderer — otherwise UIGraphicsImageRenderer multiplies by the
-    // main-screen scale and produces a mask 3× the bubble's extent, which leaves
-    // CIBlendWithAlphaMask sampling the interior of the shape for every pixel
-    // and silently drops the rounded-corner effect from the export.
-    private static let pixelRendererFormat: UIGraphicsImageRendererFormat = {
-        let f = UIGraphicsImageRendererFormat()
-        f.scale = 1
-        f.opaque = false
-        return f
-    }()
-
-    private func renderShapeMask(size: CGSize, shape: BubbleShape) -> CIImage? {
-        let renderer = UIGraphicsImageRenderer(size: size, format: Self.pixelRendererFormat)
-        let img = renderer.image { _ in
-            UIColor.black.setFill()
-            UIRectFill(CGRect(origin: .zero, size: size))
-            UIColor.white.setFill()
-            let path = UIBezierPath(
-                roundedRect: CGRect(origin: .zero, size: size),
-                cornerRadius: cornerRadius(for: shape, size: size))
-            path.fill()
-        }
-        guard let cg = img.cgImage else { return nil }
-        return CIImage(cgImage: cg)
-    }
-
-    private func renderBorder(size: CGSize,
-                              shape: BubbleShape,
-                              lineWidthPx: CGFloat,
-                              hue: Double) -> CIImage? {
-        let renderer = UIGraphicsImageRenderer(size: size, format: Self.pixelRendererFormat)
-        let img = renderer.image { ctx in
-            ctx.cgContext.clear(CGRect(origin: .zero, size: size))
-            let color = UIColor(hue: CGFloat(hue),
-                                saturation: 0.7,
-                                brightness: 0.95,
-                                alpha: 1.0)
-            color.setStroke()
-            let inset = lineWidthPx / 2
-            let rect = CGRect(origin: .zero, size: size).insetBy(dx: inset, dy: inset)
-            guard rect.width > 0, rect.height > 0 else { return }
-            let path = UIBezierPath(
-                roundedRect: rect,
-                cornerRadius: max(0, cornerRadius(for: shape, size: rect.size)))
-            path.lineWidth = lineWidthPx
-            path.stroke()
-        }
-        guard let cg = img.cgImage else { return nil }
-        return CIImage(cgImage: cg)
-    }
-
-    private func cornerRadius(for shape: BubbleShape, size: CGSize) -> CGFloat {
-        switch shape {
-        case .circle: return min(size.width, size.height) / 2
-        case .roundedRect: return min(size.width, size.height) * 0.18
-        case .rect: return 0
-        }
+        overlayRenderer.render(
+            screen: screenBuffer,
+            camera: cameraBuffer,
+            state: snapshot.map(BubbleOverlayRenderer.State.init(snapshot:)),
+            screenScale: screenScale,
+            outputSize: outputSize,
+            into: outputBuffer,
+            context: ciContext)
     }
 }
