@@ -9,6 +9,7 @@ final class TrackRowView: UIView {
     private(set) var pixelsPerSecond: CGFloat
 
     var onClipTap: ((UUID) -> Void)?
+    var onClipEdgeDrag: ((UUID, ClipView.EdgeDragEvent) -> Void)?
 
     private var clipViews: [UUID: ClipView] = [:]
     private var selectedClipID: UUID?
@@ -55,6 +56,10 @@ final class TrackRowView: UIView {
                 let view = ClipView(clip: clip, kind: track.kind)
                 let tap = UITapGestureRecognizer(target: self, action: #selector(handleClipTap(_:)))
                 view.addGestureRecognizer(tap)
+                view.onEdgeDrag = { [weak self, weak view] event in
+                    guard let view, let self else { return }
+                    self.onClipEdgeDrag?(view.clipID, event)
+                }
                 addSubview(view)
                 clipViews[clip.id] = view
             }
@@ -67,10 +72,15 @@ final class TrackRowView: UIView {
         let h = bounds.height
         for clip in track.clips {
             guard let view = clipViews[clip.id] else { continue }
+            if view.isDraggingEdge { continue }  // drag owns the frame while active
             let x = CGFloat(clip.timelineRange.start.seconds) * pixelsPerSecond
             let w = CGFloat(clip.timelineRange.duration.seconds) * pixelsPerSecond
             view.frame = CGRect(x: x, y: 2, width: max(w, 2), height: max(h - 4, 0))
         }
+    }
+
+    func clipView(for clipID: UUID) -> ClipView? {
+        clipViews[clipID]
     }
 
     @objc private func handleClipTap(_ gesture: UITapGestureRecognizer) {

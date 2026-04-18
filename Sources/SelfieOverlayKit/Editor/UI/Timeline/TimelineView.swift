@@ -40,6 +40,14 @@ final class TimelineView: UIView {
     /// Invoked when the user taps or drags on the ruler to seek.
     var onSeek: ((CMTime) -> Void)?
 
+    /// Invoked on trim edge drag events. The editor consumes these to drive
+    /// `Timeline.trimming(clipID:edge:newSourceRange:)`.
+    var onClipEdgeDrag: ((UUID, ClipView.EdgeDragEvent) -> Void)?
+
+    var trackRowView: ((UUID) -> TrackRowView?) {
+        return { [weak self] trackID in self?.trackRowViews[trackID] }
+    }
+
     // MARK: - Views
 
     let scrollView = UIScrollView()
@@ -154,6 +162,9 @@ final class TimelineView: UIView {
                     self?.selectedClipID = id
                     self?.setSelectedClipID(id)
                     self?.onClipSelected?(id)
+                }
+                row.onClipEdgeDrag = { [weak self] clipID, event in
+                    self?.onClipEdgeDrag?(clipID, event)
                 }
                 contentView.insertSubview(row, belowSubview: playheadView)
                 trackRowViews[track.id] = row

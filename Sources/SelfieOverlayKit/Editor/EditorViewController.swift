@@ -161,6 +161,9 @@ public final class EditorViewController: UIViewController {
             self?.updateSplitButtonEnabled()
             self?.updateInspector(for: id)
         }
+        timelineView.onClipEdgeDrag = { [weak self] clipID, event in
+            self?.handleEdgeDrag(clipID: clipID, event: event)
+        }
         view.addSubview(timelineView)
 
         inspector.isHidden = true
@@ -245,6 +248,147 @@ public final class EditorViewController: UIViewController {
         let clip = track.clips[loc.clipIndex]
         inspector.configure(with: clip, trackKind: track.kind)
         inspector.isHidden = false
+    }
+
+    // MARK: - Trim drag
+
+    /// Snapshot captured on `.began` so drag updates can compute frames off a
+    /// stable baseline. `1 / 30s` is the minimum clip duration per ticket AC.
+    private var activeDrag: TrimDragState?
+
+    private struct TrimDragState {
+        let clipID: UUID
+        let edge: ClipView.Edge
+        let initialFrame: CGRect
+        let originalSourceRange: CMTimeRange
+        let originalTimelineRange: CMTimeRange
+        let pixelsPerSecond: CGFloat
+        let neighborEdges: [CMTime]
+    }
+
+    private static let minClipSeconds: Double = 1.0 / 30.0
+
+    func handleEdgeDrag(clipID: UUID, event: ClipView.EdgeDragEvent) {
+        switch event.state {
+        case .began:
+            beginEdgeDrag(clipID: clipID, edge: event.edge)
+        case .changed:
+            updateEdgeDrag(translation: event.translationPoints)
+        case .ended, .cancelled, .failed:
+            commitEdgeDrag(translation: event.translationPoints)
+        default:
+            break
+        }
+    }
+
+    private func beginEdgeDrag(clipID: UUID, edge: ClipView.Edge) {
+        guard let loc = editStore.timeline.locate(clipID: clipID) else { return }
+        let track = editStore.timeline.tracks[loc.trackIndex]
+        let clip = track.clips[loc.clipIndex]
+
+        // Neighbor edges to snap against: current playhead + every edge of
+        // every other clip on the same track.
+        var neighbors: [CMTime] = [playback.player.currentTime()]
+        for other in track.clips where other.id != clip.id {
+            neighbors.append(other.timelineRange.start)
+            neighbors.append(other.timelineRange.end)
+        }
+
+        guard let row = timelineView.trackRowView(track.id),
+              let clipView = row.clipView(for: clipID) else { return }
+
+        clipView.isDraggingEdge = true
+        activeDrag = TrimDragState(
+            clipID: clipID,
+            edge: edge,
+            initialFrame: clipView.frame,
+            originalSourceRange: clip.sourceRange,
+            originalTimelineRange: clip.timelineRange,
+            pixelsPerSecond: timelineView.pixelsPerSecond,
+            neighborEdges: neighbors)
+    }
+
+    private func updateEdgeDrag(translation: CGFloat) {
+        guard let drag = activeDrag,
+              let loc = editStore.timeline.locate(clipID: drag.clipID),
+              let row = timelineView.trackRowView(editStore.timeline.tracks[loc.trackIndex].id),
+              let clipView = row.clipView(for: drag.clipID) else { return }
+
+        let minWidth = CGFloat(Self.minClipSeconds) * drag.pixelsPerSecond
+        switch drag.edge {
+        case .leading:
+            var newX = drag.initialFrame.origin.x + translation
+            // Clamp so the clip retains minimum width.
+            let maxX = drag.initialFrame.maxX - minWidth
+            newX = min(newX, maxX)
+            newX = max(newX, 0)
+            newX = snappedX(newX, drag: drag)
+            let newWidth = drag.initialFrame.maxX - newX
+            clipView.frame = CGRect(
+                x: newX, y: drag.initialFrame.origin.y,
+                width: newWidth, height: drag.initialFrame.height)
+        case .trailing:
+            var newMaxX = drag.initialFrame.maxX + translation
+            let minAllowed = drag.initialFrame.minX + minWidth
+            newMaxX = max(newMaxX, minAllowed)
+            newMaxX = snappedX(newMaxX, drag: drag)
+            let newWidth = newMaxX - drag.initialFrame.minX
+            clipView.frame = CGRect(
+                x: drag.initialFrame.minX, y: drag.initialFrame.origin.y,
+                width: newWidth, height: drag.initialFrame.height)
+        }
+    }
+
+    private func snappedX(_ x: CGFloat, drag: TrimDragState) -> CGFloat {
+        let pps = drag.pixelsPerSecond
+        let threshold = SnapEngine.thresholdSeconds(forPoints: 8, pixelsPerSecond: pps)
+        let candidate = CMTime(seconds: Double(x) / Double(pps), preferredTimescale: 600)
+        let snapped = SnapEngine.snap(
+            candidate: candidate,
+            neighbors: drag.neighborEdges,
+            thresholdSeconds: threshold)
+        return CGFloat(snapped.seconds) * pps
+    }
+
+    private func commitEdgeDrag(translation: CGFloat) {
+        guard let drag = activeDrag else { return }
+        defer { activeDrag = nil }
+
+        guard let loc = editStore.timeline.locate(clipID: drag.clipID),
+              let row = timelineView.trackRowView(editStore.timeline.tracks[loc.trackIndex].id),
+              let clipView = row.clipView(for: drag.clipID) else { return }
+
+        clipView.isDraggingEdge = false
+
+        // Convert the final frame back to a new sourceRange.
+        let pps = drag.pixelsPerSecond
+        let finalFrame = clipView.frame
+        let newTimelineStart = Double(finalFrame.origin.x) / Double(pps)
+        let newTimelineEnd = Double(finalFrame.maxX) / Double(pps)
+        let newTimelineDuration = newTimelineEnd - newTimelineStart
+
+        // Back-solve the source range. Timeline duration = source duration / speed;
+        // for the edge being trimmed, the source edge slides by the timeline delta * speed.
+        let clip = editStore.timeline.tracks[loc.trackIndex].clips[loc.clipIndex]
+        let speed = clip.speed
+        let sourceDuration = newTimelineDuration * speed
+        let newSourceRange: CMTimeRange
+        switch drag.edge {
+        case .leading:
+            let sourceStart = drag.originalSourceRange.end.seconds - sourceDuration
+            newSourceRange = CMTimeRange(
+                start: CMTime(seconds: max(0, sourceStart), preferredTimescale: 600),
+                duration: CMTime(seconds: sourceDuration, preferredTimescale: 600))
+        case .trailing:
+            newSourceRange = CMTimeRange(
+                start: drag.originalSourceRange.start,
+                duration: CMTime(seconds: sourceDuration, preferredTimescale: 600))
+        }
+
+        editStore.apply(name: "Trim") {
+            $0.trimming(clipID: drag.clipID, edge: drag.edge == .leading ? .start : .end,
+                        newSourceRange: newSourceRange)
+        }
     }
 
     private func commitSpeed(_ speed: Double) {
