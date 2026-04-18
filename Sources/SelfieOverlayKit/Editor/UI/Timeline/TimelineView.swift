@@ -98,6 +98,10 @@ final class TimelineView: UIView {
         let rulerPan = UIPanGestureRecognizer(target: self, action: #selector(handleRulerPan(_:)))
         rulerView.addGestureRecognizer(rulerPan)
 
+        let playheadPan = UIPanGestureRecognizer(
+            target: self, action: #selector(handlePlayheadPan(_:)))
+        playheadView.addGestureRecognizer(playheadPan)
+
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
         addGestureRecognizer(pinch)
 
@@ -234,16 +238,24 @@ final class TimelineView: UIView {
 
     @objc private func handleRulerTap(_ gesture: UITapGestureRecognizer) {
         let point = gesture.location(in: rulerView)
-        seekToRulerPoint(point)
+        seekToContentX(point.x)
     }
 
     @objc private func handleRulerPan(_ gesture: UIPanGestureRecognizer) {
         let point = gesture.location(in: rulerView)
-        seekToRulerPoint(point)
+        seekToContentX(point.x)
     }
 
-    private func seekToRulerPoint(_ point: CGPoint) {
-        let seconds = max(0, Double(point.x) / Double(pixelsPerSecond))
+    // Drag the playhead itself to scrub. Gesture location is read in the
+    // stable `contentView` coordinate space so mid-drag playhead relayouts
+    // (from the PlaybackController feedback loop) don't confuse translation.
+    @objc private func handlePlayheadPan(_ gesture: UIPanGestureRecognizer) {
+        let point = gesture.location(in: contentView)
+        seekToContentX(point.x)
+    }
+
+    private func seekToContentX(_ x: CGFloat) {
+        let seconds = max(0, Double(x) / Double(pixelsPerSecond))
         let clamped = min(seconds, timeline.duration.seconds)
         onSeek?(CMTime(seconds: clamped, preferredTimescale: 600))
     }
