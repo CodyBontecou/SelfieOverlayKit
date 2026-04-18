@@ -80,6 +80,29 @@ final class EditorViewControllerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: project.folderURL.path))
     }
 
+    // MARK: - AC: hardware keyboard shortcuts are wired up
+
+    func testKeyCommandsExposeCoreEditorShortcuts() throws {
+        let project = try makeProject()
+        let vc = try EditorViewController(project: project, projectStore: store)
+        vc.loadViewIfNeeded()
+
+        let commands = try XCTUnwrap(vc.keyCommands)
+        func match(_ input: String, _ flags: UIKeyModifierFlags) -> UIKeyCommand? {
+            commands.first { $0.input == input && $0.modifierFlags == flags }
+        }
+        XCTAssertNotNil(match(" ", []), "space must be bound for play/pause")
+        XCTAssertNotNil(match("z", .command), "cmd-z must be bound for undo")
+        XCTAssertNotNil(match("z", [.command, .shift]), "cmd-shift-z must be bound for redo")
+        XCTAssertNotNil(match("b", .command), "cmd-b must be bound for split")
+        XCTAssertNotNil(match("s", []), "s must be bound for split")
+        XCTAssertNotNil(match(UIKeyCommand.inputLeftArrow, []), "left arrow must nudge")
+        XCTAssertNotNil(match(UIKeyCommand.inputRightArrow, []), "right arrow must nudge")
+        XCTAssertNotNil(match(UIKeyCommand.inputLeftArrow, .alternate),
+                        "opt-left must nudge by a frame")
+        XCTAssertNotNil(match("\u{8}", []), "backspace must delete selected clip")
+    }
+
     // MARK: - AC: minimal export produces a readable MP4
 
     func testExportToTempFileProducesPlayableMP4() throws {

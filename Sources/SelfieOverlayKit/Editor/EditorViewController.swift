@@ -134,12 +134,18 @@ public final class EditorViewController: UIViewController {
         super.viewDidAppear(animated)
         playback.play()
         updatePlayPauseButton()
+        // Become first responder so hardware keyboard shortcuts (iPad and
+        // Bluetooth keyboards on iPhone) route here instead of being
+        // swallowed by the AVPlayer view or scroll view.
+        becomeFirstResponder()
     }
 
     public override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         playback.pause()
     }
+
+    public override var canBecomeFirstResponder: Bool { true }
 
     // MARK: - Layout
 
@@ -587,6 +593,97 @@ public final class EditorViewController: UIViewController {
         let track = editStore.timeline.tracks[loc.trackIndex]
         let playhead = playback.player.currentTime()
         editStore.apply(name: "Split") { $0.splitting(at: playhead, trackID: track.id) }
+    }
+
+    // MARK: - Hardware keyboard
+
+    /// Seconds advanced by ← / → when no modifier is held. Option shrinks
+    /// the step to a single 30 fps frame so power users can land precise
+    /// cut points without zooming.
+    static let keyboardCoarseStep: Double = 1
+    static let keyboardFineStep: Double = 1.0 / 30.0
+
+    public override var keyCommands: [UIKeyCommand]? {
+        var commands: [UIKeyCommand] = [
+            UIKeyCommand(input: " ", modifierFlags: [],
+                         action: #selector(handleKeyPlayPause),
+                         discoverabilityTitle: "Play / Pause"),
+            UIKeyCommand(input: "z", modifierFlags: .command,
+                         action: #selector(handleKeyUndo),
+                         discoverabilityTitle: "Undo"),
+            UIKeyCommand(input: "z", modifierFlags: [.command, .shift],
+                         action: #selector(handleKeyRedo),
+                         discoverabilityTitle: "Redo"),
+            UIKeyCommand(input: "b", modifierFlags: .command,
+                         action: #selector(handleKeySplit),
+                         discoverabilityTitle: "Split at Playhead"),
+            UIKeyCommand(input: "s", modifierFlags: [],
+                         action: #selector(handleKeySplit),
+                         discoverabilityTitle: "Split at Playhead"),
+            UIKeyCommand(input: UIKeyCommand.inputLeftArrow, modifierFlags: [],
+                         action: #selector(handleKeyNudgeLeft),
+                         discoverabilityTitle: "Nudge Playhead Back"),
+            UIKeyCommand(input: UIKeyCommand.inputRightArrow, modifierFlags: [],
+                         action: #selector(handleKeyNudgeRight),
+                         discoverabilityTitle: "Nudge Playhead Forward"),
+            UIKeyCommand(input: UIKeyCommand.inputLeftArrow, modifierFlags: .alternate,
+                         action: #selector(handleKeyNudgeLeftFine),
+                         discoverabilityTitle: "Nudge One Frame Back"),
+            UIKeyCommand(input: UIKeyCommand.inputRightArrow, modifierFlags: .alternate,
+                         action: #selector(handleKeyNudgeRightFine),
+                         discoverabilityTitle: "Nudge One Frame Forward"),
+            UIKeyCommand(input: "\u{8}", modifierFlags: [],
+                         action: #selector(handleKeyDelete),
+                         discoverabilityTitle: "Delete Selected Clip"),
+            UIKeyCommand(input: UIKeyCommand.inputDelete, modifierFlags: [],
+                         action: #selector(handleKeyDelete),
+                         discoverabilityTitle: "Delete Selected Clip")
+        ]
+        if #available(iOS 15.0, *) {
+            for command in commands { command.wantsPriorityOverSystemBehavior = true }
+        }
+        return commands
+    }
+
+    @objc private func handleKeyPlayPause() { didTapPlayPause() }
+
+    @objc private func handleKeySplit() { didTapSplit() }
+
+    @objc private func handleKeyUndo() {
+        editStore.undo()
+    }
+
+    @objc private func handleKeyRedo() {
+        editStore.redo()
+    }
+
+    @objc private func handleKeyDelete() {
+        guard timelineView.selectedClipID != nil else { return }
+        commitDelete()
+    }
+
+    @objc private func handleKeyNudgeLeft() {
+        nudgePlayhead(by: -Self.keyboardCoarseStep)
+    }
+
+    @objc private func handleKeyNudgeRight() {
+        nudgePlayhead(by: Self.keyboardCoarseStep)
+    }
+
+    @objc private func handleKeyNudgeLeftFine() {
+        nudgePlayhead(by: -Self.keyboardFineStep)
+    }
+
+    @objc private func handleKeyNudgeRightFine() {
+        nudgePlayhead(by: Self.keyboardFineStep)
+    }
+
+    private func nudgePlayhead(by deltaSeconds: Double) {
+        let current = playback.player.currentTime().seconds
+        let duration = editStore.timeline.duration.seconds
+        let safeDuration = duration.isFinite ? max(0, duration) : 0
+        let target = max(0, min(safeDuration, current + deltaSeconds))
+        playback.seek(to: CMTime(seconds: target, preferredTimescale: 600))
     }
 
     private func updateSplitButtonEnabled() {
