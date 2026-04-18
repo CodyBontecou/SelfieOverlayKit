@@ -188,6 +188,15 @@ public enum CompositionBuilder {
         video.renderSize = renderSize
         video.customVideoCompositorClass = BubbleVideoCompositor.self
 
+        // Tag output as BT.709 SDR. Capture sources (ReplayKit, camera) are
+        // 8-bit BT.709 today; any wide-color input is tone-mapped to SDR on
+        // the way through the BGRA compositor. Explicit tags keep the output
+        // color deterministic on the sharing paths that matter (social/IM),
+        // which re-encode to SDR anyway.
+        video.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
+        video.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
+        video.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
+
         let totalDuration = duration == .zero ? composition.duration : duration
 
         var instructions: [AVVideoCompositionInstructionProtocol] = []

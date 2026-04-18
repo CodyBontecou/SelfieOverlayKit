@@ -139,6 +139,24 @@ final class CompositionBuilderTests: XCTestCase {
         XCTAssertEqual(output.audioMix.inputParameters.first?.audioTimePitchAlgorithm, .spectral)
     }
 
+    /// Output is tagged BT.709 (SDR) so downstream encoders don't guess at
+    /// color. See dxo decision: no HDR preservation; social sharing paths
+    /// re-encode to SDR regardless.
+    func testVideoCompositionIsTaggedBT709() throws {
+        let (_, screen, camera) = try makeAssetsAndProject(duration: t(1))
+        let timeline = Timeline.fromAssets(screenAsset: screen, cameraAsset: camera)
+
+        let output = try CompositionBuilder.build(
+            timeline: timeline, screenAsset: screen, cameraAsset: camera)
+
+        XCTAssertEqual(output.videoComposition.colorPrimaries,
+                       AVVideoColorPrimaries_ITU_R_709_2)
+        XCTAssertEqual(output.videoComposition.colorTransferFunction,
+                       AVVideoTransferFunction_ITU_R_709_2)
+        XCTAssertEqual(output.videoComposition.colorYCbCrMatrix,
+                       AVVideoYCbCrMatrix_ITU_R_709_2)
+    }
+
     /// Regression: when the screen .mov is silent (mic denied on ReplayKit
     /// side), the camera .mov still carries mic audio from AVCaptureSession.
     /// CompositionBuilder must pull .mic audio from camera rather than
