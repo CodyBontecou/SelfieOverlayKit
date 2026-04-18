@@ -266,9 +266,32 @@ public final class EditorViewController: UIViewController {
         ]
 
         let cacheRoot = project.folderURL.appendingPathComponent("cache", isDirectory: true)
+        let screenID = Self.assetIdentity(for: project.screenURL)
+        let cameraID = Self.assetIdentity(for: project.cameraURL)
 
-        for (sourceID, asset) in [(SourceID.screen, screenAsset), (SourceID.camera, cameraAsset)] {
-            let cacheURL = cacheRoot.appendingPathComponent("thumbs_\(sourceID.rawValue).png")
+        let thumbsName: (SourceID, String) -> String = { source, id in
+            "thumbs_\(source.rawValue)_\(id).png"
+        }
+        let waveformName: (SourceID, String) -> String = { source, id in
+            "waveform_\(source.rawValue)_\(id).bin"
+        }
+
+        // Drop any cache files whose identity suffix doesn't match the
+        // current source, so a re-recorded project folder doesn't render
+        // stale thumbnails from the prior take.
+        Self.purgeStaleCacheFiles(
+            in: cacheRoot,
+            keep: [
+                thumbsName(.screen, screenID),
+                thumbsName(.camera, cameraID),
+                waveformName(.mic, screenID)
+            ])
+
+        for (sourceID, asset, identity) in [
+            (SourceID.screen, screenAsset, screenID),
+            (SourceID.camera, cameraAsset, cameraID)
+        ] {
+            let cacheURL = cacheRoot.appendingPathComponent(thumbsName(sourceID, identity))
             if let cached = ThumbnailStripRenderer.shared.cachedStrip(at: cacheURL) {
                 applyThumbnail(cached, for: sourceID)
             } else {
@@ -284,7 +307,7 @@ public final class EditorViewController: UIViewController {
             }
         }
 
-        let micCache = cacheRoot.appendingPathComponent("waveform_\(SourceID.mic.rawValue).bin")
+        let micCache = cacheRoot.appendingPathComponent(waveformName(.mic, screenID))
         if let cached = WaveformRenderer.shared.cachedPeaks(at: micCache) {
             applyWaveform(cached, for: .mic)
         } else if screenAsset.tracks(withMediaType: .audio).first != nil {
@@ -295,6 +318,29 @@ public final class EditorViewController: UIViewController {
                 guard let peaks else { return }
                 self?.applyWaveform(peaks, for: .mic)
             }
+        }
+    }
+
+    /// `{mtime_s}-{size_bytes}` — any change to the underlying file bumps this
+    /// suffix and forces the thumbnail/waveform cache to rebuild.
+    static func assetIdentity(for url: URL) -> String {
+        let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
+        let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+        return String(format: "%.0f-%lld", mtime, size)
+    }
+
+    static func purgeStaleCacheFiles(in cacheRoot: URL, keep: [String]) {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(at: cacheRoot,
+                                                       includingPropertiesForKeys: nil) else { return }
+        let keepSet = Set(keep)
+        for entry in entries where !keepSet.contains(entry.lastPathComponent) {
+            // Only prune our own known prefixes so we never touch files
+            // outside the renderer caches.
+            let name = entry.lastPathComponent
+            guard name.hasPrefix("thumbs_") || name.hasPrefix("waveform_") else { continue }
+            try? fm.removeItem(at: entry)
         }
     }
 

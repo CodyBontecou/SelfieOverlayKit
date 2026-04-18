@@ -111,6 +111,44 @@ final class ThumbnailAndWaveformTests: XCTestCase {
         XCTAssertFalse(cached?.isEmpty ?? true)
     }
 
+    // MARK: - Cache identity / invalidation
+
+    func testAssetIdentityChangesWhenSourceFileChanges() throws {
+        let project = try store.create()
+        try TestVideoFixtures.writeBlackMOV(to: project.screenURL, duration: t(1),
+                                            color: (0, 0, 0))
+        let first = EditorViewController.assetIdentity(for: project.screenURL)
+        // Wait long enough for mtime resolution (1s on some filesystems) and
+        // rewrite at a different size.
+        Thread.sleep(forTimeInterval: 1.1)
+        try TestVideoFixtures.writeBlackMOV(to: project.screenURL, duration: t(2),
+                                            color: (0, 0, 0))
+        let second = EditorViewController.assetIdentity(for: project.screenURL)
+        XCTAssertNotEqual(first, second,
+                          "re-recording the source must bump the cache identity so the cache is invalidated")
+    }
+
+    func testPurgeStaleCacheFilesRemovesUnknownEntries() throws {
+        let project = try store.create()
+        let cacheRoot = project.folderURL.appendingPathComponent("cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: cacheRoot, withIntermediateDirectories: true)
+
+        let keep = cacheRoot.appendingPathComponent("thumbs_screen_abc.png")
+        let stale = cacheRoot.appendingPathComponent("thumbs_screen_xyz.png")
+        let unrelated = cacheRoot.appendingPathComponent("composition.json")
+        try Data([0]).write(to: keep)
+        try Data([0]).write(to: stale)
+        try Data([0]).write(to: unrelated)
+
+        EditorViewController.purgeStaleCacheFiles(in: cacheRoot, keep: [keep.lastPathComponent])
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: keep.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path),
+                       "stale thumbs_*.png should be removed")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: unrelated.path),
+                      "files without a thumbs_/waveform_ prefix must be left alone")
+    }
+
     // MARK: - Trim reveals / hides cached data without regen
 
     func testWaveformViewPeakRangeControlsDrawnWindow() {
