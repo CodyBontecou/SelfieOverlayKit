@@ -138,6 +138,7 @@ public final class EditorViewController: UIViewController {
         // Bluetooth keyboards on iPhone) route here instead of being
         // swallowed by the AVPlayer view or scroll view.
         becomeFirstResponder()
+        checkForInterruptedExport()
     }
 
     public override func viewWillDisappear(_ animated: Bool) {
@@ -873,10 +874,35 @@ public final class EditorViewController: UIViewController {
                 }
             }
 
-        exporter.start(outputURL: url)
+        exporter.start(outputURL: url, sentinelURL: project.exportSentinelURL)
     }
 
     private var activeExporter: Exporter?
+    private var didCheckExportSentinel = false
+
+    /// If the last export was killed mid-write (OS termination after the
+    /// background-task grace period expired), the sentinel file will still
+    /// be on disk when the editor next opens. Offer a one-tap retry — we
+    /// can't resume AVAssetExportSession, so "Try Again" just starts a
+    /// fresh export. See ios-selfie-sdk-wf8.
+    fileprivate func checkForInterruptedExport() {
+        guard !didCheckExportSentinel else { return }
+        didCheckExportSentinel = true
+        let sentinel = project.exportSentinelURL
+        guard FileManager.default.fileExists(atPath: sentinel.path) else { return }
+
+        let alert = UIAlertController(
+            title: "Export Interrupted",
+            message: "Your previous export didn't finish. Try again?",
+            preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Try Again", style: .default) { [weak self] _ in
+            self?.didTapSave()
+        })
+        alert.addAction(UIAlertAction(title: "Dismiss", style: .cancel) { _ in
+            try? FileManager.default.removeItem(at: sentinel)
+        })
+        present(alert, animated: true)
+    }
 
     private func presentAlert(title: String, message: String) {
         let alert = UIAlertController(

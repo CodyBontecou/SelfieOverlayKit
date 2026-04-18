@@ -189,6 +189,71 @@ final class ExporterTests: XCTestCase {
         try? FileManager.default.removeItem(at: url)
     }
 
+    // MARK: - AC5: sentinel file lifecycle (ios-selfie-sdk-wf8)
+
+    /// Sentinel file: written on start(), removed on completion. If the app
+    /// is killed mid-export the sentinel survives, and the editor uses its
+    /// presence to prompt "previous export was interrupted" on relaunch.
+    /// Background-task grace itself is UIKit-only and not XCTest'd here.
+
+    func testSentinelFileIsWrittenOnStartAndRemovedOnCompletion() throws {
+        let output = try makeOutput(duration: 1)
+        let exporter = Exporter(
+            composition: output.composition,
+            videoComposition: output.videoComposition,
+            audioMix: output.audioMix)
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("exporter-sentinel-\(UUID().uuidString).mp4")
+        let sentinel = tempRoot.appendingPathComponent(".export-in-progress")
+        try FileManager.default.createDirectory(
+            at: tempRoot, withIntermediateDirectories: true)
+
+        let done = expectation(description: "export completes")
+        exporter.done
+            .sink { state in
+                if case .completed = state { done.fulfill() }
+            }
+            .store(in: &cancellables)
+
+        exporter.start(outputURL: url, sentinelURL: sentinel)
+        // Sentinel must exist while the export is in flight.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sentinel.path))
+
+        wait(for: [done], timeout: 30.0)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sentinel.path),
+                       "sentinel must be cleared on completion")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    func testSentinelFileIsRemovedOnCancel() throws {
+        let output = try makeOutput(duration: 3)
+        let exporter = Exporter(
+            composition: output.composition,
+            videoComposition: output.videoComposition,
+            audioMix: output.audioMix)
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("exporter-sentinel-cancel-\(UUID().uuidString).mp4")
+        let sentinel = tempRoot.appendingPathComponent(".export-in-progress")
+        try FileManager.default.createDirectory(
+            at: tempRoot, withIntermediateDirectories: true)
+
+        let finished = expectation(description: "export terminates")
+        exporter.done
+            .sink { _ in finished.fulfill() }
+            .store(in: &cancellables)
+
+        exporter.start(outputURL: url, sentinelURL: sentinel)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            exporter.cancel()
+        }
+        wait(for: [finished], timeout: 10.0)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sentinel.path),
+                       "sentinel must be cleared on cancel")
+        try? FileManager.default.removeItem(at: url)
+    }
+
     func testDiskSpacePreflightReturnsNilWhenSpaceIsAmple() throws {
         let output = try makeOutput(duration: 1)
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())

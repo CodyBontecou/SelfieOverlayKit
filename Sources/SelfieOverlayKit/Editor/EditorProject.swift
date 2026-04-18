@@ -22,12 +22,14 @@ public struct EditorProject: Codable, Equatable {
     public static let bubbleTimelineFilename = "bubble.json"
     public static let metadataFilename = "project.json"
     public static let timelineFilename = "timeline.json"
+    public static let exportSentinelFilename = ".export-in-progress"
 
     public var screenURL: URL { folderURL.appendingPathComponent(Self.screenFilename) }
     public var cameraURL: URL { folderURL.appendingPathComponent(Self.cameraFilename) }
     public var bubbleTimelineURL: URL { folderURL.appendingPathComponent(Self.bubbleTimelineFilename) }
     public var metadataURL: URL { folderURL.appendingPathComponent(Self.metadataFilename) }
     public var timelineURL: URL { folderURL.appendingPathComponent(Self.timelineFilename) }
+    public var exportSentinelURL: URL { folderURL.appendingPathComponent(Self.exportSentinelFilename) }
 
     /// Pass the containing folder into a `JSONDecoder` via this key so
     /// `EditorProject.init(from:)` can rebuild `folderURL` without the

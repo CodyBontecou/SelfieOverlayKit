@@ -2,6 +2,7 @@ import AVFoundation
 import Combine
 import CoreMedia
 import Foundation
+import UIKit
 
 /// Wraps `AVAssetExportSession` with a progress stream + cancel support.
 /// The editor's Save / Share flows use this instead of calling the export
@@ -51,6 +52,8 @@ public final class Exporter {
 
     private var session: AVAssetExportSession?
     private var progressTimer: Timer?
+    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+    private var sentinelURL: URL?
 
     public init(composition: AVComposition,
                 videoComposition: AVVideoComposition,
@@ -69,7 +72,8 @@ public final class Exporter {
     // MARK: - Control
 
     public func start(outputURL: URL,
-                      fileType: AVFileType = .mp4) {
+                      fileType: AVFileType = .mp4,
+                      sentinelURL: URL? = nil) {
         guard state == .notStarted else { return }
         try? FileManager.default.removeItem(at: outputURL)
 
@@ -92,13 +96,22 @@ public final class Exporter {
         session.audioMix = audioMix
 
         self.session = session
+        self.sentinelURL = sentinelURL
+        if let sentinelURL {
+            // Best-effort: create the sentinel as an empty file. If the write
+            // fails we still proceed with the export — missing sentinel just
+            // means we can't detect a subsequent mid-export termination.
+            FileManager.default.createFile(atPath: sentinelURL.path, contents: nil)
+        }
         state = .exporting
         startProgressTimer()
+        beginBackgroundTask()
 
         session.exportAsynchronously { [weak self] in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.stopProgressTimer()
+                self.clearSentinel()
                 switch session.status {
                 case .completed:
                     self.progress = 1.0
@@ -120,8 +133,38 @@ public final class Exporter {
                     // on the completion handler — keep the compiler happy.
                     break
                 }
+                self.endBackgroundTask()
             }
         }
+    }
+
+    // MARK: - Background task
+
+    /// Request ~30 s of background runtime so a user who flips away
+    /// mid-export doesn't have the export session killed out from under us
+    /// for short trips. AVAssetExportSession can't resume, so the expiration
+    /// handler cancels cleanly — the sentinel file survives and the editor
+    /// can prompt "previous export was interrupted" on relaunch.
+    private func beginBackgroundTask() {
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "SelfieOverlayKit.Exporter") { [weak self] in
+            self?.session?.cancelExport()
+            self?.endBackgroundTask()
+        }
+    }
+
+    private func endBackgroundTask() {
+        guard backgroundTaskID != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTaskID)
+        backgroundTaskID = .invalid
+    }
+
+    // MARK: - Sentinel file
+
+    private func clearSentinel() {
+        if let sentinelURL {
+            try? FileManager.default.removeItem(at: sentinelURL)
+        }
+        sentinelURL = nil
     }
 
     // MARK: - Disk-space preflight
