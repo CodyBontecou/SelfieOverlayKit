@@ -33,6 +33,16 @@ final class ClipView: UIView {
     /// for this view so the drag handler can set it directly.
     var isDraggingEdge: Bool = false
 
+    let thumbnailBackground: UIImageView = {
+        let iv = UIImageView()
+        iv.contentMode = .scaleToFill
+        iv.clipsToBounds = true
+        iv.isUserInteractionEnabled = false
+        return iv
+    }()
+
+    let waveformView = WaveformView()
+
     private let leadingHandle = UIView()
     private let trailingHandle = UIView()
     private let leadingStripe = CALayer()
@@ -61,10 +71,55 @@ final class ClipView: UIView {
         selectionLayer.cornerRadius = 6
         layer.addSublayer(selectionLayer)
 
+        addSubview(thumbnailBackground)
+        addSubview(waveformView)
+        waveformView.isHidden = kind != .audio
+        thumbnailBackground.isHidden = kind != .video
+
         setupHandle(leadingHandle, stripe: leadingStripe, action: #selector(handleLeadingPan(_:)))
         setupHandle(trailingHandle, stripe: trailingStripe, action: #selector(handleTrailingPan(_:)))
         addSubview(leadingHandle)
         addSubview(trailingHandle)
+    }
+
+    /// Show a thumbnail strip covering `sourceRange` out of `sourceDuration`.
+    /// The cached strip covers the full source, so we slide an UIImageView
+    /// window that reveals only the visible portion.
+    func setThumbnailStrip(_ image: UIImage?, sourceDuration: CMTime) {
+        thumbnailBackground.image = image
+        updateThumbnailOffset(sourceDuration: sourceDuration)
+    }
+
+    /// Peaks is the full per-source waveform; peakRange selects the slice
+    /// visible for this clip (`sourceRange` mapped into peak indices).
+    func setWaveform(peaks: [Float], sourceDuration: CMTime) {
+        waveformView.peaks = peaks
+        updateWaveformRange(sourceDuration: sourceDuration)
+    }
+
+    private func updateThumbnailOffset(sourceDuration: CMTime) {
+        guard let image = thumbnailBackground.image,
+              sourceDuration.seconds > 0,
+              clip.sourceRange.duration.seconds > 0 else { return }
+        let sourceStartFrac = clip.sourceRange.start.seconds / sourceDuration.seconds
+        let sourceDurFrac = clip.sourceRange.duration.seconds / sourceDuration.seconds
+        let stripWidth = bounds.width / CGFloat(max(sourceDurFrac, 0.0001))
+        let offsetX = -CGFloat(sourceStartFrac) * stripWidth
+        thumbnailBackground.image = image
+        thumbnailBackground.frame = CGRect(
+            x: offsetX, y: 0,
+            width: stripWidth, height: bounds.height)
+    }
+
+    private func updateWaveformRange(sourceDuration: CMTime) {
+        guard sourceDuration.seconds > 0, !waveformView.peaks.isEmpty else { return }
+        let total = waveformView.peaks.count
+        let startFrac = clip.sourceRange.start.seconds / sourceDuration.seconds
+        let endFrac = clip.sourceRange.end.seconds / sourceDuration.seconds
+        let startIdx = max(0, min(total - 1, Int(Double(total) * startFrac)))
+        let endIdx = max(startIdx + 1, min(total, Int(Double(total) * endFrac)))
+        waveformView.peakRange = startIdx..<endIdx
+        waveformView.frame = bounds
     }
 
     @available(*, unavailable)
@@ -89,6 +144,12 @@ final class ClipView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         selectionLayer.frame = bounds
+        waveformView.frame = bounds
+        if kind == .video && thumbnailBackground.image != nil {
+            // Keep the thumbnail window aligned after zoom / layout changes.
+            // We don't know sourceDuration here (TrackRowView does), so
+            // callers pushing new data call setThumbnailStrip again.
+        }
         let hit = Self.edgeHitWidth
         leadingHandle.frame = CGRect(x: 0, y: 0, width: hit, height: bounds.height)
         trailingHandle.frame = CGRect(x: bounds.width - hit, y: 0, width: hit, height: bounds.height)

@@ -76,6 +76,7 @@ public final class EditorViewController: UIViewController {
         previewCanvas.player = playback.player
         bindTimeLabel()
         bindTimeline()
+        loadThumbnailsAndWaveforms()
     }
 
     private func bindTimeline() {
@@ -235,6 +236,78 @@ public final class EditorViewController: UIViewController {
     }
 
     // MARK: - Actions
+
+    // MARK: - Thumbnails + waveforms
+
+    private var sourceAssets: [SourceID: AVAsset] = [:]
+    private var sourceDurations: [SourceID: CMTime] = [:]
+    private var thumbnailStrips: [SourceID: UIImage] = [:]
+    private var waveformPeaks: [SourceID: [Float]] = [:]
+
+    private func loadThumbnailsAndWaveforms() {
+        let screenAsset = AVURLAsset(url: project.screenURL)
+        let cameraAsset = AVURLAsset(url: project.cameraURL)
+        sourceAssets = [.screen: screenAsset, .camera: cameraAsset, .mic: screenAsset]
+        sourceDurations = [
+            .screen: screenAsset.duration,
+            .camera: cameraAsset.duration,
+            .mic: screenAsset.duration
+        ]
+
+        let cacheRoot = project.folderURL.appendingPathComponent("cache", isDirectory: true)
+
+        for (sourceID, asset) in [(SourceID.screen, screenAsset), (SourceID.camera, cameraAsset)] {
+            let cacheURL = cacheRoot.appendingPathComponent("thumbs_\(sourceID.rawValue).png")
+            if let cached = ThumbnailStripRenderer.shared.cachedStrip(at: cacheURL) {
+                applyThumbnail(cached, for: sourceID)
+            } else {
+                ThumbnailStripRenderer.shared.renderAndCache(
+                    asset: asset,
+                    cacheURL: cacheURL,
+                    count: 16,
+                    thumbnailSize: CGSize(width: 44, height: 44)
+                ) { [weak self] image in
+                    guard let image else { return }
+                    self?.applyThumbnail(image, for: sourceID)
+                }
+            }
+        }
+
+        let micCache = cacheRoot.appendingPathComponent("waveform_\(SourceID.mic.rawValue).bin")
+        if let cached = WaveformRenderer.shared.cachedPeaks(at: micCache) {
+            applyWaveform(cached, for: .mic)
+        } else if screenAsset.tracks(withMediaType: .audio).first != nil {
+            WaveformRenderer.shared.renderAndCache(
+                asset: screenAsset,
+                cacheURL: micCache
+            ) { [weak self] peaks in
+                guard let peaks else { return }
+                self?.applyWaveform(peaks, for: .mic)
+            }
+        }
+    }
+
+    private func applyThumbnail(_ image: UIImage, for sourceID: SourceID) {
+        thumbnailStrips[sourceID] = image
+        guard let sourceDuration = sourceDurations[sourceID] else { return }
+        for track in editStore.timeline.tracks where track.kind == .video && track.sourceBinding == sourceID {
+            guard let row = timelineView.trackRowView(track.id) else { continue }
+            for clip in track.clips {
+                row.clipView(for: clip.id)?.setThumbnailStrip(image, sourceDuration: sourceDuration)
+            }
+        }
+    }
+
+    private func applyWaveform(_ peaks: [Float], for sourceID: SourceID) {
+        waveformPeaks[sourceID] = peaks
+        guard let sourceDuration = sourceDurations[sourceID] else { return }
+        for track in editStore.timeline.tracks where track.kind == .audio && track.sourceBinding == sourceID {
+            guard let row = timelineView.trackRowView(track.id) else { continue }
+            for clip in track.clips {
+                row.clipView(for: clip.id)?.setWaveform(peaks: peaks, sourceDuration: sourceDuration)
+            }
+        }
+    }
 
     // MARK: - Inspector binding
 
