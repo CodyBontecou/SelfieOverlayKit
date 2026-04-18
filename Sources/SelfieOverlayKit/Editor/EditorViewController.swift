@@ -820,7 +820,8 @@ public final class EditorViewController: UIViewController {
             output = try CompositionBuilder.build(
                 timeline: editStore.timeline,
                 project: project,
-                bubbleTimeline: bubbleTimeline)
+                bubbleTimeline: bubbleTimeline,
+                screenScale: UIScreen.main.scale)
         } catch {
             completion(.failure(error))
             return
