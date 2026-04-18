@@ -31,6 +31,7 @@ public final class EditorViewController: UIViewController {
     let playPauseButton = UIButton(type: .system)
     let timeLabel = UILabel()
     let toolbarRow = UIStackView()
+    let splitButton = UIButton(type: .system)
     let timelineView = TimelineView()
 
     // MARK: - State
@@ -88,6 +89,7 @@ public final class EditorViewController: UIViewController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] time in
                 self?.timelineView.setPlayhead(time)
+                self?.updateSplitButtonEnabled()
             }
             .store(in: &cancellables)
     }
@@ -140,12 +142,23 @@ public final class EditorViewController: UIViewController {
         toolbarRow.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(toolbarRow)
 
+        splitButton.setImage(UIImage(systemName: "scissors"), for: .normal)
+        splitButton.accessibilityLabel = "Split at playhead"
+        splitButton.accessibilityIdentifier = "editor.split"
+        splitButton.addTarget(self, action: #selector(didTapSplit), for: .touchUpInside)
+        splitButton.isEnabled = false
+        toolbarRow.addArrangedSubview(splitButton)
+
         timelineView.translatesAutoresizingMaskIntoConstraints = false
         timelineView.layer.cornerRadius = 8
         timelineView.clipsToBounds = true
         timelineView.update(timeline: editStore.timeline)
         timelineView.onSeek = { [weak self] time in
             self?.playback.seek(to: time)
+        }
+        timelineView.onClipSelected = { [weak self] id in
+            self?.updateSplitButtonEnabled()
+            _ = id
         }
         view.addSubview(timelineView)
 
@@ -205,6 +218,27 @@ public final class EditorViewController: UIViewController {
     }
 
     // MARK: - Actions
+
+    @objc func didTapSplit() {
+        guard let clipID = timelineView.selectedClipID,
+              let loc = editStore.timeline.locate(clipID: clipID) else { return }
+        let track = editStore.timeline.tracks[loc.trackIndex]
+        let playhead = playback.player.currentTime()
+        editStore.apply(name: "Split") { $0.splitting(at: playhead, trackID: track.id) }
+    }
+
+    private func updateSplitButtonEnabled() {
+        let canSplit: Bool
+        if let clipID = timelineView.selectedClipID,
+           let loc = editStore.timeline.locate(clipID: clipID) {
+            let clip = editStore.timeline.tracks[loc.trackIndex].clips[loc.clipIndex]
+            let playhead = playback.player.currentTime()
+            canSplit = playhead > clip.timelineRange.start && playhead < clip.timelineRange.end
+        } else {
+            canSplit = false
+        }
+        splitButton.isEnabled = canSplit
+    }
 
     @objc private func didTapPlayPause() {
         if playback.isPlaying {
