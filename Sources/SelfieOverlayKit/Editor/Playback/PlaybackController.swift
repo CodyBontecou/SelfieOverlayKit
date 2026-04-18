@@ -45,6 +45,12 @@ public final class PlaybackController {
     private let rebuildDebounce: TimeInterval
     private var displayLink: CADisplayLink?
 
+    /// Monotonically increasing token used to discard stale `seek` completions
+    /// when the user scrubs faster than AVPlayer drains callbacks — without
+    /// this, an older seek's completion can clobber the playhead back to a
+    /// prior position.
+    private var seekGeneration: UInt64 = 0
+
     // MARK: - Init
 
     init(editStore: EditStore,
@@ -88,8 +94,11 @@ public final class PlaybackController {
     }
 
     public func seek(to time: CMTime) {
+        seekGeneration &+= 1
+        let token = seekGeneration
         player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
-            self?.currentTimeSubject.send(time)
+            guard let self, token == self.seekGeneration else { return }
+            self.currentTimeSubject.send(time)
         }
     }
 
