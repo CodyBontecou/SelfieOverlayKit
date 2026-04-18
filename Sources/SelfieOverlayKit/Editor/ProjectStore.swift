@@ -50,6 +50,23 @@ final class ProjectStore {
         try data.write(to: project.bubbleTimelineURL, options: .atomic)
     }
 
+    /// Persist the edit-model `Timeline` for autosave / reopen-after-crash.
+    /// Writes atomically so a crash mid-encode doesn't corrupt the last good
+    /// snapshot.
+    func saveTimeline(_ timeline: Timeline, to project: EditorProject) throws {
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(timeline)
+        try data.write(to: project.timelineURL, options: .atomic)
+    }
+
+    /// Load the last persisted edit-model `Timeline`. Returns nil if no
+    /// autosave snapshot has been written yet (e.g. first open).
+    func loadTimeline(for project: EditorProject) throws -> Timeline? {
+        guard fileManager.fileExists(atPath: project.timelineURL.path) else { return nil }
+        let data = try Data(contentsOf: project.timelineURL)
+        return try JSONDecoder().decode(Timeline.self, from: data)
+    }
+
     /// Load a previously persisted project by id.
     func load(id: UUID) throws -> EditorProject {
         let folder = rootURL.appendingPathComponent(id.uuidString, isDirectory: true)

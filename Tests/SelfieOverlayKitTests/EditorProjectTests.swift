@@ -1,3 +1,4 @@
+import CoreMedia
 import XCTest
 @testable import SelfieOverlayKit
 
@@ -107,6 +108,57 @@ final class EditorProjectTests: XCTestCase {
         XCTAssertTrue(entries.contains("camera.mov"))
         XCTAssertTrue(entries.contains("bubble.json"))
         XCTAssertTrue(entries.contains("project.json"))
+    }
+
+    // MARK: - AC: Codable Timeline (autosave round-trip)
+
+    func testTimelineCodableRoundtripPreservesCMTimeTimescales() throws {
+        let tb: CMTimeScale = 600
+        let sourceRange = CMTimeRange(
+            start: CMTime(value: 120, timescale: tb),
+            duration: CMTime(value: 1800, timescale: tb))
+        let timelineRange = CMTimeRange(
+            start: CMTime(value: 0, timescale: tb),
+            duration: CMTime(value: 900, timescale: tb))
+        let clip = Clip(
+            sourceID: .mic,
+            sourceRange: sourceRange,
+            timelineRange: timelineRange,
+            speed: 2.0,
+            volume: 0.5)
+        let track = Track(kind: .audio, sourceBinding: .mic, clips: [clip])
+        let timeline = Timeline(
+            tracks: [track],
+            duration: CMTime(value: 2400, timescale: tb))
+
+        let data = try JSONEncoder().encode(timeline)
+        let decoded = try JSONDecoder().decode(Timeline.self, from: data)
+        XCTAssertEqual(decoded, timeline)
+        // Explicitly verify timescales survived — Double(seconds) would drop
+        // them and break CompositionBuilder's scaleTimeRange.
+        XCTAssertEqual(decoded.tracks[0].clips[0].sourceRange.start.timescale, tb)
+        XCTAssertEqual(decoded.tracks[0].clips[0].sourceRange.duration.timescale, tb)
+    }
+
+    func testSaveAndLoadTimelineViaProjectStore() throws {
+        let project = try store.create()
+        XCTAssertNil(try store.loadTimeline(for: project),
+                     "loadTimeline returns nil before any autosave write")
+
+        let tb: CMTimeScale = 600
+        let clip = Clip(
+            sourceID: .screen,
+            sourceRange: CMTimeRange(start: .zero,
+                                     duration: CMTime(value: 600, timescale: tb)),
+            timelineRange: CMTimeRange(start: .zero,
+                                       duration: CMTime(value: 600, timescale: tb)))
+        let track = Track(kind: .video, sourceBinding: .screen, clips: [clip])
+        let timeline = Timeline(tracks: [track],
+                                duration: CMTime(value: 600, timescale: tb))
+
+        try store.saveTimeline(timeline, to: project)
+        let loaded = try store.loadTimeline(for: project)
+        XCTAssertEqual(loaded, timeline)
     }
 
     func testDeleteRemovesFolder() throws {

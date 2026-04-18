@@ -59,7 +59,11 @@ public final class EditorViewController: UIViewController {
 
         let screenAsset = AVURLAsset(url: project.screenURL)
         let cameraAsset = AVURLAsset(url: project.cameraURL)
-        let timeline = Timeline.fromAssets(screenAsset: screenAsset, cameraAsset: cameraAsset)
+        // Prefer an autosaved timeline (from a prior edit session) over a
+        // fresh one derived from the raw assets so mid-edit crashes don't
+        // lose work.
+        let timeline = (try? projectStore.loadTimeline(for: project))
+            ?? Timeline.fromAssets(screenAsset: screenAsset, cameraAsset: cameraAsset)
         self.editStore = EditStore(timeline: timeline)
         self.playback = PlaybackController(
             editStore: editStore,
@@ -92,6 +96,18 @@ public final class EditorViewController: UIViewController {
             }
             .store(in: &cancellables)
 
+        // Autosave — 2s after the last mutation, persist the Timeline JSON
+        // off-main. Debounce runs independently of `PlaybackController`'s
+        // 50ms rebuild debounce so they don't coalesce. `dropFirst` skips the
+        // initial @Published replay so we don't write before any edits.
+        editStore.$timeline
+            .dropFirst()
+            .debounce(for: autosaveInterval, scheduler: DispatchQueue.main)
+            .sink { [weak self] timeline in
+                self?.autosave(timeline)
+            }
+            .store(in: &cancellables)
+
         playback.currentTime
             .receive(on: DispatchQueue.main)
             .sink { [weak self] time in
@@ -99,6 +115,19 @@ public final class EditorViewController: UIViewController {
                 self?.updateSplitButtonEnabled()
             }
             .store(in: &cancellables)
+    }
+
+    /// Window between the last timeline edit and the autosave write. Held as
+    /// a stored property so tests can shorten it without shipping a custom
+    /// init surface.
+    var autosaveInterval: DispatchQueue.SchedulerTimeType.Stride = .seconds(2)
+
+    private func autosave(_ timeline: Timeline) {
+        let project = self.project
+        let store = self.projectStore
+        DispatchQueue.global(qos: .utility).async {
+            try? store.saveTimeline(timeline, to: project)
+        }
     }
 
     public override func viewDidAppear(_ animated: Bool) {
