@@ -1,5 +1,6 @@
 import UIKit
 import SwiftUI
+import Combine
 
 /// Internal controller that owns the camera session and the bubble view. The bubble
 /// lives in a dedicated UIWindow at `.alert + 1` so it floats above modal sheets and
@@ -9,7 +10,10 @@ final class OverlayController {
     let settingsStore = SettingsStore()
 
     /// Injected by `SelfieOverlayKit` so the inline config panel can drive recording.
-    weak var recorder: RecordingController?
+    weak var recorder: RecordingController? {
+        didSet { observeRecorder() }
+    }
+    private var recorderCancellable: AnyCancellable?
 
     /// Invoked when the user taps the close button in the bubble's action ring.
     /// The SDK wires this to its public `stop()` so `isVisible` stays in sync.
@@ -69,7 +73,16 @@ final class OverlayController {
         self.bubble = bubble
         self.overlayWindow = window
 
+        bubble.setRecordingIndicatorVisible(recorder?.isRecording == true)
         cameraSession.start()
+    }
+
+    private func observeRecorder() {
+        recorderCancellable = recorder?.$isRecording
+            .receive(on: RunLoop.main)
+            .sink { [weak self] isRecording in
+                self?.bubble?.setRecordingIndicatorVisible(isRecording)
+            }
     }
 
     func hide() {

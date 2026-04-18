@@ -7,6 +7,7 @@ import Combine
 final class BubbleView: UIView {
 
     private let previewView = CameraPreviewView()
+    private let recordingIndicator = RecordingIndicatorView()
     private let settings: SettingsStore
     private weak var cameraSession: CameraSession?
 
@@ -50,11 +51,21 @@ final class BubbleView: UIView {
         previewView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(previewView)
 
+        recordingIndicator.isHidden = true
+        addSubview(recordingIndicator)
+
         // Subtle drop shadow on a container layer (we can't shadow a masked layer).
         layer.shadowColor = UIColor.black.cgColor
         layer.shadowOpacity = 0.25
         layer.shadowRadius = 8
         layer.shadowOffset = CGSize(width: 0, height: 4)
+    }
+
+    /// Shows/hides the pulsing red recording indicator in the bubble's top-right
+    /// corner. The indicator lives purely in the live UIView hierarchy and does
+    /// not appear in exported videos — see `RecordingIndicatorView` for details.
+    func setRecordingIndicatorVisible(_ visible: Bool) {
+        recordingIndicator.setActive(visible)
     }
 
     private func observeSettings() {
@@ -117,7 +128,22 @@ final class BubbleView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         previewView.frame = bounds
+        layoutRecordingIndicator()
         layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: layer.cornerRadius).cgPath
+    }
+
+    private func layoutRecordingIndicator() {
+        // Scale the dot with the bubble but clamp so it stays legible and doesn't
+        // dominate small bubbles. Inset from the top-right by roughly the corner
+        // radius so it visually sits inside the rounded shape rather than on top
+        // of the border.
+        let dotSize = max(8, min(bounds.width * 0.09, 16))
+        let cornerInset = max(6, layer.cornerRadius * 0.35)
+        recordingIndicator.frame = CGRect(
+            x: bounds.maxX - dotSize - cornerInset,
+            y: bounds.minY + cornerInset,
+            width: dotSize,
+            height: dotSize)
     }
 
     // MARK: - Gestures
