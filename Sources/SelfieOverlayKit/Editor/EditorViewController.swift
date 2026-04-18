@@ -33,6 +33,7 @@ public final class EditorViewController: UIViewController {
     let toolbarRow = UIStackView()
     let splitButton = UIButton(type: .system)
     let timelineView = TimelineView()
+    let inspector = ClipInspectorView()
 
     // MARK: - State
 
@@ -158,9 +159,15 @@ public final class EditorViewController: UIViewController {
         }
         timelineView.onClipSelected = { [weak self] id in
             self?.updateSplitButtonEnabled()
-            _ = id
+            self?.updateInspector(for: id)
         }
         view.addSubview(timelineView)
+
+        inspector.isHidden = true
+        inspector.onSpeedCommit = { [weak self] speed in
+            self?.commitSpeed(speed)
+        }
+        view.addSubview(inspector)
 
         NSLayoutConstraint.activate([
             previewCanvas.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -180,7 +187,11 @@ public final class EditorViewController: UIViewController {
             timelineView.topAnchor.constraint(equalTo: toolbarRow.bottomAnchor, constant: 12),
             timelineView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             timelineView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            timelineView.bottomAnchor.constraint(
+            timelineView.bottomAnchor.constraint(equalTo: inspector.topAnchor, constant: -12),
+
+            inspector.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            inspector.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            inspector.bottomAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16)
         ])
     }
@@ -218,6 +229,24 @@ public final class EditorViewController: UIViewController {
     }
 
     // MARK: - Actions
+
+    // MARK: - Inspector binding
+
+    func updateInspector(for clipID: UUID?) {
+        guard let clipID,
+              let loc = editStore.timeline.locate(clipID: clipID) else {
+            inspector.isHidden = true
+            return
+        }
+        let clip = editStore.timeline.tracks[loc.trackIndex].clips[loc.clipIndex]
+        inspector.configure(with: clip)
+        inspector.isHidden = false
+    }
+
+    private func commitSpeed(_ speed: Double) {
+        guard let clipID = timelineView.selectedClipID else { return }
+        editStore.apply(name: "Speed") { $0.settingPairedSpeed(clipID: clipID, speed) }
+    }
 
     @objc func didTapSplit() {
         guard let clipID = timelineView.selectedClipID,

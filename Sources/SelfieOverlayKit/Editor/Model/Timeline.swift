@@ -48,6 +48,31 @@ public struct Timeline: Hashable {
         return copy
     }
 
+    /// Apply a new speed to the clip *and* to every overlapping audio clip
+    /// on other audio tracks, so paired video + audio stay in lockstep.
+    /// A single call bundles everything into one undo step.
+    public func settingPairedSpeed(clipID: UUID, _ speed: Double) -> Timeline {
+        guard let loc = locate(clipID: clipID) else { return self }
+        let originalRange = tracks[loc.trackIndex].clips[loc.clipIndex].timelineRange
+        let originalKind = tracks[loc.trackIndex].kind
+        var copy = self.settingSpeed(clipID: clipID, speed)
+
+        // Only re-pair when the user retimes a video clip — audio-only retimes
+        // don't imply any video counterpart.
+        guard originalKind == .video else { return copy }
+        for track in tracks where track.kind == .audio {
+            for clip in track.clips where overlaps(clip.timelineRange, originalRange) {
+                copy = copy.settingSpeed(clipID: clip.id, speed)
+            }
+        }
+        return copy
+    }
+
+    private func overlaps(_ a: CMTimeRange, _ b: CMTimeRange) -> Bool {
+        let intersection = a.intersection(b)
+        return !intersection.isEmpty && intersection.duration > .zero
+    }
+
     public func settingSpeed(clipID: UUID, _ speed: Double) -> Timeline {
         precondition(speed > 0, "speed must be positive")
         guard let loc = locate(clipID: clipID) else { return self }
