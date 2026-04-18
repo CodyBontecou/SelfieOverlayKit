@@ -72,6 +72,17 @@ final class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         session.addInput(input)
         currentInput = input
 
+        // Lock the camera to 30 fps so it matches ReplayKit's default screen
+        // capture rate. When the two sessions run at different rates (camera
+        // 30, ReplayKit 60 on modern devices) the bubble overlay stutters
+        // against the screen track. See ios-selfie-sdk-rfl.
+        if (try? device.lockForConfiguration()) != nil {
+            let thirty = CMTimeMake(value: 1, timescale: 30)
+            device.activeVideoMinFrameDuration = thirty
+            device.activeVideoMaxFrameDuration = thirty
+            device.unlockForConfiguration()
+        }
+
         videoOutput.videoSettings = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
         ]

@@ -139,6 +139,46 @@ final class CompositionBuilderTests: XCTestCase {
         XCTAssertEqual(output.audioMix.inputParameters.first?.audioTimePitchAlgorithm, .spectral)
     }
 
+    /// Post-rfl: capture lock puts both streams at 30 fps, so the
+    /// composition frameDuration lands at 1/30.
+    func testCompositionFrameDurationMatchesMatched30FPSFixtures() throws {
+        let project = try store.create()
+        try TestVideoFixtures.writeBlackMOV(
+            to: project.screenURL, duration: t(1), withSilentAudio: true, fps: 30)
+        try TestVideoFixtures.writeBlackMOV(
+            to: project.cameraURL, duration: t(1), fps: 30)
+        let screen = AVURLAsset(url: project.screenURL)
+        let camera = AVURLAsset(url: project.cameraURL)
+
+        let timeline = Timeline.fromAssets(screenAsset: screen, cameraAsset: camera)
+        let output = try CompositionBuilder.build(
+            timeline: timeline, screenAsset: screen, cameraAsset: camera)
+
+        let frameDur = output.videoComposition.frameDuration
+        XCTAssertEqual(CMTimeGetSeconds(frameDur), 1.0 / 30.0, accuracy: 1e-3)
+    }
+
+    /// Legacy projects recorded before the capture-time 30 fps lock may have
+    /// mismatched rates. The composition-level backstop picks the higher
+    /// rate so the slower stream duplicates frames, rather than the faster
+    /// stream getting decimated.
+    func testMismatchedFPSPicksHigherRateAsBackstop() throws {
+        let project = try store.create()
+        try TestVideoFixtures.writeBlackMOV(
+            to: project.screenURL, duration: t(1), withSilentAudio: true, fps: 60)
+        try TestVideoFixtures.writeBlackMOV(
+            to: project.cameraURL, duration: t(1), fps: 30)
+        let screen = AVURLAsset(url: project.screenURL)
+        let camera = AVURLAsset(url: project.cameraURL)
+
+        let timeline = Timeline.fromAssets(screenAsset: screen, cameraAsset: camera)
+        let output = try CompositionBuilder.build(
+            timeline: timeline, screenAsset: screen, cameraAsset: camera)
+
+        let frameDur = output.videoComposition.frameDuration
+        XCTAssertEqual(CMTimeGetSeconds(frameDur), 1.0 / 60.0, accuracy: 1e-3)
+    }
+
     /// Output is tagged BT.709 (SDR) so downstream encoders don't guess at
     /// color. See dxo decision: no HDR preservation; social sharing paths
     /// re-encode to SDR regardless.

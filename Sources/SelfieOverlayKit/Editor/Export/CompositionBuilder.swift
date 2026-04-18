@@ -109,6 +109,14 @@ public enum CompositionBuilder {
             }
         }
 
+        // Composition-level backstop for older projects recorded before the
+        // capture-time 30 fps lock landed: pick the higher of screen/camera
+        // so the slower stream duplicates frames against the faster one
+        // rather than the faster stream getting decimated. See
+        // ios-selfie-sdk-rfl.
+        let screenFPS = sourceVideo[.screen]?.nominalFrameRate
+        let cameraFPS = sourceVideo[.camera]?.nominalFrameRate
+        let preferredFPS = [screenFPS, cameraFPS].compactMap { $0 }.max()
         let videoComposition = makeBubbleVideoComposition(
             for: composition,
             screenClips: screenClips,
@@ -117,7 +125,7 @@ public enum CompositionBuilder {
             bubbleTimeline: bubbleTimeline,
             screenScale: screenScale,
             duration: timeline.duration,
-            preferredFrameRate: sourceVideo[.screen]?.nominalFrameRate)
+            preferredFrameRate: preferredFPS)
 
         let audioMix = AVMutableAudioMix()
         audioMix.inputParameters = audioMixParams

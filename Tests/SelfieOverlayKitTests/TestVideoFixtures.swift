@@ -14,7 +14,8 @@ enum TestVideoFixtures {
         duration: CMTime,
         size: CGSize = CGSize(width: 64, height: 64),
         color: (r: UInt8, g: UInt8, b: UInt8) = (0, 0, 0),
-        withSilentAudio: Bool = false
+        withSilentAudio: Bool = false,
+        fps: Int32 = 30
     ) throws {
         try? FileManager.default.removeItem(at: url)
 
@@ -59,7 +60,6 @@ enum TestVideoFixtures {
         writer.startSession(atSourceTime: .zero)
 
         let pixelBuffer = makeSolidPixelBuffer(size: size, color: color)
-        let fps: Int32 = 30
         let frameCount = max(1, Int(duration.seconds * Double(fps)))
         let frameDuration = CMTime(value: 1, timescale: fps)
 
