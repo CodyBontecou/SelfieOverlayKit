@@ -460,8 +460,7 @@ public final class EditorViewController: UIViewController {
     }
 
     @objc func didTapShare() {
-        // Minimal export path; T14 replaces with a progress-aware pipeline.
-        exportToTempFile { [weak self] result in
+        exportWithProgress(showingProgress: true) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch result {
@@ -487,7 +486,7 @@ public final class EditorViewController: UIViewController {
     }
 
     private func performSave() {
-        exportToTempFile { [weak self] result in
+        exportWithProgress(showingProgress: true) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch result {
@@ -517,34 +516,68 @@ public final class EditorViewController: UIViewController {
     }
 
     func exportToTempFile(completion: @escaping (Result<URL, Error>) -> Void) {
+        exportWithProgress(showingProgress: false, completion: completion)
+    }
+
+    func exportWithProgress(showingProgress: Bool,
+                            completion: @escaping (Result<URL, Error>) -> Void) {
         let output = CompositionBuilder.build(
             timeline: editStore.timeline,
             project: project,
             bubbleTimeline: bubbleTimeline)
-        guard let session = AVAssetExportSession(
-            asset: output.composition,
-            presetName: AVAssetExportPresetHighestQuality) else {
-            completion(.failure(ExportError.unsupportedExportPreset))
-            return
-        }
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("selfieoverlay-editor-\(UUID().uuidString).mp4")
-        try? FileManager.default.removeItem(at: url)
-        session.outputURL = url
-        session.outputFileType = .mp4
-        session.videoComposition = output.videoComposition
-        session.audioMix = output.audioMix
-        session.exportAsynchronously {
-            switch session.status {
-            case .completed:
-                completion(.success(url))
-            case .failed, .cancelled:
-                completion(.failure(session.error ?? ExportError.unknown))
-            default:
-                completion(.failure(ExportError.unknown))
-            }
+        let exporter = Exporter(
+            composition: output.composition,
+            videoComposition: output.videoComposition,
+            audioMix: output.audioMix)
+        self.activeExporter = exporter
+
+        var progressSheet: ExportProgressViewController?
+        if showingProgress {
+            let sheet = ExportProgressViewController()
+            sheet.modalPresentationStyle = .overFullScreen
+            sheet.modalTransitionStyle = .crossDissolve
+            sheet.onCancel = { [weak exporter] in exporter?.cancel() }
+            present(sheet, animated: true)
+            progressSheet = sheet
         }
+
+        var progressCancellable: AnyCancellable?
+        progressCancellable = exporter.$progress
+            .receive(on: DispatchQueue.main)
+            .sink { value in progressSheet?.progressView.progress = Float(value) }
+
+        var doneCancellable: AnyCancellable?
+        doneCancellable = exporter.done
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] finalState in
+                _ = progressCancellable  // retained until completion
+                _ = doneCancellable
+                self?.activeExporter = nil
+                let finish: () -> Void = {
+                    switch finalState {
+                    case .completed(let url):
+                        completion(.success(url))
+                    case .cancelled:
+                        completion(.failure(ExportError.cancelled))
+                    case .failed(let message):
+                        completion(.failure(ExportError.exporter(message)))
+                    default:
+                        completion(.failure(ExportError.unknown))
+                    }
+                }
+                if let progressSheet {
+                    progressSheet.dismiss(animated: true, completion: finish)
+                } else {
+                    finish()
+                }
+            }
+
+        exporter.start(outputURL: url)
     }
+
+    private var activeExporter: Exporter?
 
     private func presentAlert(title: String, message: String) {
         let alert = UIAlertController(
@@ -559,8 +592,73 @@ public final class EditorViewController: UIViewController {
         }
     }
 
-    enum ExportError: Error {
+    enum ExportError: LocalizedError {
         case unsupportedExportPreset
         case unknown
+        case cancelled
+        case exporter(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .unsupportedExportPreset: return "Export preset unavailable."
+            case .unknown: return "Unknown export error."
+            case .cancelled: return "Export cancelled."
+            case .exporter(let message): return message
+            }
+        }
+    }
+}
+
+/// Presented modally during Save / Share so users can see progress and
+/// cancel. Minimal UI — a determinate bar + a Cancel button.
+final class ExportProgressViewController: UIViewController {
+
+    let progressView = UIProgressView(progressViewStyle: .default)
+    var onCancel: (() -> Void)?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = UIColor.black.withAlphaComponent(0.75)
+
+        let card = UIView()
+        card.backgroundColor = .secondarySystemBackground
+        card.layer.cornerRadius = 14
+        card.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(card)
+
+        let title = UILabel()
+        title.text = "Exporting…"
+        title.font = .systemFont(ofSize: 16, weight: .semibold)
+        title.textAlignment = .center
+
+        progressView.progressTintColor = .systemBlue
+        progressView.translatesAutoresizingMaskIntoConstraints = false
+
+        let cancel = UIButton(type: .system)
+        cancel.setTitle("Cancel", for: .normal)
+        cancel.addTarget(self, action: #selector(didTapCancel), for: .touchUpInside)
+
+        let stack = UIStackView(arrangedSubviews: [title, progressView, cancel])
+        stack.axis = .vertical
+        stack.spacing = 12
+        stack.alignment = .fill
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            card.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            card.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            card.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
+            card.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 20),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -20),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -16),
+            progressView.heightAnchor.constraint(equalToConstant: 4)
+        ])
+    }
+
+    @objc private func didTapCancel() {
+        onCancel?()
     }
 }
