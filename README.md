@@ -21,6 +21,14 @@ Useful for streamers, creators, reaction videos, tutorials, demos — any time y
 - Swift 5.9+
 - Xcode 15+
 
+## Footprint
+
+Pure Swift, no bundled assets, no third-party dependencies. Only links system frameworks (AVFoundation, ReplayKit, SwiftUI, UIKit, CoreImage) that already ship with iOS.
+
+- **Source**: ~6,200 lines across 42 files (~320 KB)
+- **Added to host app binary**: typically ~400 KB – 1 MB after App Store thinning
+- **Runtime**: no ML models, no fonts, no images
+
 ## Installation
 
 Add to your `Package.swift`:
