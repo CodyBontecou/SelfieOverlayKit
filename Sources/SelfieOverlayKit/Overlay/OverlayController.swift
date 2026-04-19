@@ -194,17 +194,25 @@ final class OverlayController {
         recorder.stopAndPresentEditor(from: top, completion: nil)
     }
 
-    /// `Application Support/SelfieOverlayKit/RawExports/<uuid>/`. The folder is
-    /// created lazily by `RawExporter`; we just compute the path. Host apps own
-    /// cleanup once the bundle has been delivered via `onRawExportComplete`.
+    /// `<root>/SelfieOverlayKit/RawExports/<uuid>/`, where `<root>` is either
+    /// the Documents or Application Support directory depending on
+    /// `settings.rawExportLocation`. The folder itself is created lazily by
+    /// `RawExporter`; we just compute the path. Host apps own cleanup once
+    /// the bundle has been delivered via `onRawExportComplete`.
     private func nextRawExportDestination() -> URL? {
         let fm = FileManager.default
-        guard let support = try? fm.url(
-            for: .applicationSupportDirectory,
+        let directory: FileManager.SearchPathDirectory = {
+            switch settingsStore.rawExportLocation {
+            case .documents: return .documentDirectory
+            case .applicationSupport: return .applicationSupportDirectory
+            }
+        }()
+        guard let root = try? fm.url(
+            for: directory,
             in: .userDomainMask,
             appropriateFor: nil,
             create: true) else { return nil }
-        return support
+        return root
             .appendingPathComponent("SelfieOverlayKit", isDirectory: true)
             .appendingPathComponent("RawExports", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

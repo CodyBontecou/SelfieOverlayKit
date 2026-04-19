@@ -19,11 +19,13 @@ public final class SelfieOverlayKit {
     /// Invoked on the main queue whenever the bubble's stop-recording controls
     /// finish a raw export (i.e. when `settings.useRawExport == true`). The host
     /// app is responsible for moving / sharing / deleting the files at the URLs
-    /// in the bundle — the SDK writes them to its own Application Support
-    /// subfolder and never auto-cleans them.
+    /// in the bundle — the SDK writes them under
+    /// `<location>/SelfieOverlayKit/RawExports/<uuid>/` (where `<location>`
+    /// follows `settings.rawExportLocation`) and never auto-cleans them.
     ///
     /// Leaving this nil while `useRawExport` is enabled is supported (the files
-    /// are still written) but unreferenced — the host app has no way to find them.
+    /// are still written, and surface in the Files app when the host opts into
+    /// file sharing — see `RawExportLocation.documents`).
     public var onRawExportComplete: ((RawExportBundle) -> Void)? {
         didSet { controller.onRawExportComplete = onRawExportComplete }
     }

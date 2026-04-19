@@ -16,6 +16,20 @@ public enum BubbleShape: String, CaseIterable, Codable {
     }
 }
 
+/// Controls where the bubble's raw-export path writes recordings on disk.
+public enum RawExportLocation: String, CaseIterable, Codable {
+    /// `Documents/SelfieOverlayKit/RawExports/<uuid>/`. Visible in the Files
+    /// app under "On My iPhone → [App Name]" when the host adds
+    /// `UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace` to its
+    /// Info.plist. Default — matches the typical "let users grab the files"
+    /// reason for enabling raw export in the first place.
+    case documents
+    /// `Application Support/SelfieOverlayKit/RawExports/<uuid>/`. Sandboxed
+    /// and never user-visible, regardless of Info.plist. Use when the host
+    /// app wants raw recordings hidden from end users.
+    case applicationSupport
+}
+
 /// Observable settings that persist to UserDefaults. Host apps can read/write these
 /// directly, or hand users the built-in settings sheet.
 public final class SettingsStore: ObservableObject {
@@ -31,6 +45,7 @@ public final class SettingsStore: ObservableObject {
         static let borderHue = "SelfieOverlay.borderHue"
         static let hideDuringRecording = "SelfieOverlay.hideDuringRecording"
         static let useRawExport = "SelfieOverlay.useRawExport"
+        static let rawExportLocation = "SelfieOverlay.rawExportLocation"
     }
 
     private let defaults: UserDefaults
@@ -87,6 +102,13 @@ public final class SettingsStore: ObservableObject {
         didSet { defaults.set(useRawExport, forKey: Key.useRawExport) }
     }
 
+    /// Where raw exports are written on disk. See `RawExportLocation` for the
+    /// trade-offs. Defaults to `.documents` so files surface in the Files app
+    /// when the host's Info.plist opts into file sharing.
+    @Published public var rawExportLocation: RawExportLocation {
+        didSet { defaults.set(rawExportLocation.rawValue, forKey: Key.rawExportLocation) }
+    }
+
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
 
@@ -106,6 +128,9 @@ public final class SettingsStore: ObservableObject {
         self.borderHue = defaults.object(forKey: Key.borderHue) as? Double ?? 0.58
         self.hideDuringRecording = defaults.object(forKey: Key.hideDuringRecording) as? Bool ?? false
         self.useRawExport = defaults.object(forKey: Key.useRawExport) as? Bool ?? false
+
+        let rawLocation = defaults.string(forKey: Key.rawExportLocation) ?? RawExportLocation.documents.rawValue
+        self.rawExportLocation = RawExportLocation(rawValue: rawLocation) ?? .documents
     }
 
     /// Reset all settings to defaults.
@@ -119,5 +144,6 @@ public final class SettingsStore: ObservableObject {
         borderHue = 0.58
         hideDuringRecording = false
         useRawExport = false
+        rawExportLocation = .documents
     }
 }
