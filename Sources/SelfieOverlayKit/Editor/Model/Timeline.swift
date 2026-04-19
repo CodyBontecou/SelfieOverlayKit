@@ -76,7 +76,11 @@ public struct Timeline: Hashable {
             sourceRange: source.sourceRange,
             timelineRange: CMTimeRange(start: candidateStart, duration: clipDuration),
             speed: source.speed,
-            volume: source.volume)
+            volume: source.volume,
+            canvasScale: source.canvasScale,
+            canvasOffset: source.canvasOffset,
+            cropRect: source.cropRect,
+            cameraShape: source.cameraShape)
 
         var copy = self
         copy.tracks[loc.trackIndex].clips.append(duplicate)
@@ -143,6 +147,49 @@ public struct Timeline: Hashable {
         let clamped = min(max(Timeline.volumeRange.lowerBound, volume),
                           Timeline.volumeRange.upperBound)
         copy.tracks[loc.trackIndex].clips[loc.clipIndex].volume = clamped
+        return copy
+    }
+
+    /// On-canvas scale range. 0.1× lets the user shrink a layer to a corner
+    /// thumbnail; 8× matches CapCut's upper pinch limit. The inspector slider
+    /// maps to a log₂ scale (0.25×–4×) inside this range.
+    public static let canvasScaleRange: ClosedRange<CGFloat> = 0.1...8.0
+
+    public func settingCanvasScale(clipID: UUID, _ scale: CGFloat) -> Timeline {
+        guard let loc = locate(clipID: clipID) else { return self }
+        let clamped = min(max(Timeline.canvasScaleRange.lowerBound, scale),
+                          Timeline.canvasScaleRange.upperBound)
+        var copy = self
+        copy.tracks[loc.trackIndex].clips[loc.clipIndex].canvasScale = clamped
+        return copy
+    }
+
+    public func settingCanvasOffset(clipID: UUID, _ offset: CGPoint) -> Timeline {
+        guard let loc = locate(clipID: clipID) else { return self }
+        var copy = self
+        copy.tracks[loc.trackIndex].clips[loc.clipIndex].canvasOffset = offset
+        return copy
+    }
+
+    /// Clamps the crop rect to the unit square and guards against zero /
+    /// inverted rects so the renderer can't divide by zero when it maps
+    /// the normalized rect onto `source.extent`.
+    public func settingCropRect(clipID: UUID, _ rect: CGRect) -> Timeline {
+        guard let loc = locate(clipID: clipID) else { return self }
+        let minX = min(max(rect.origin.x, 0), 1)
+        let minY = min(max(rect.origin.y, 0), 1)
+        let maxX = min(max(rect.maxX, minX + 0.01), 1)
+        let maxY = min(max(rect.maxY, minY + 0.01), 1)
+        var copy = self
+        copy.tracks[loc.trackIndex].clips[loc.clipIndex].cropRect =
+            CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+        return copy
+    }
+
+    public func settingCameraShape(clipID: UUID, _ shape: CameraLayerShape?) -> Timeline {
+        guard let loc = locate(clipID: clipID) else { return self }
+        var copy = self
+        copy.tracks[loc.trackIndex].clips[loc.clipIndex].cameraShape = shape
         return copy
     }
 
@@ -225,14 +272,22 @@ public struct Timeline: Hashable {
             sourceRange: CMTimeRange(start: clip.sourceRange.start, end: splitSourceTime),
             timelineRange: CMTimeRange(start: clip.timelineRange.start, end: effectiveT),
             speed: clip.speed,
-            volume: clip.volume)
+            volume: clip.volume,
+            canvasScale: clip.canvasScale,
+            canvasOffset: clip.canvasOffset,
+            cropRect: clip.cropRect,
+            cameraShape: clip.cameraShape)
         let right = Clip(
             id: UUID(),
             sourceID: clip.sourceID,
             sourceRange: CMTimeRange(start: splitSourceTime, end: clip.sourceRange.end),
             timelineRange: CMTimeRange(start: effectiveT, end: clip.timelineRange.end),
             speed: clip.speed,
-            volume: clip.volume)
+            volume: clip.volume,
+            canvasScale: clip.canvasScale,
+            canvasOffset: clip.canvasOffset,
+            cropRect: clip.cropRect,
+            cameraShape: clip.cameraShape)
 
         var copy = self
         copy.tracks[ti].clips.replaceSubrange(ci...ci, with: [left, right])
