@@ -1,10 +1,11 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import UIKit
 
-/// Output of `SelfieOverlayKit.stopRecording(exportTo:)` — the three raw
-/// tracks plus the bubble timeline JSON, suitable for editing in an external
-/// NLE (Premiere, FCP, Resolve) or the standalone short-form editor app.
+/// Output of `SelfieOverlayKit.stopRecording(exportTo:)` — the raw tracks, the
+/// bubble timeline JSON, and a pre-composited `final.mov` showing the screen
+/// with the camera baked into its bubble.
 public struct RawExportBundle {
 
     /// ReplayKit screen capture (.mov). Video-only when `audioURL` is non-nil
@@ -26,6 +27,12 @@ public struct RawExportBundle {
     /// directly if they want to recreate the selfie overlay in their editor.
     public let bubbleTimelineURL: URL
 
+    /// `final.mov` — screen recording with the camera composited into its
+    /// bubble (shape/mirror/opacity sampled from the timeline) and audio
+    /// muxed in. Produced from the other four files; host apps can ship this
+    /// directly without running the editor app.
+    public let finalURL: URL
+
     /// Duration of the screen recording.
     public let duration: CMTime
 }
@@ -42,6 +49,7 @@ enum RawExporter {
         case missingSourceFile(URL)
         case audioExportFailed(String)
         case audioStripFailed(String)
+        case bubbleTimelineReadFailed(String)
 
         var errorDescription: String? {
             switch self {
@@ -53,6 +61,8 @@ enum RawExporter {
                 return "Audio demux failed: \(reason)"
             case .audioStripFailed(let reason):
                 return "Failed to strip audio from screen recording: \(reason)"
+            case .bubbleTimelineReadFailed(let reason):
+                return "Failed to decode bubble.json for final compose: \(reason)"
             }
         }
     }
@@ -61,6 +71,7 @@ enum RawExporter {
     static let cameraFilename = "camera.mov"
     static let audioFilename = "audio.m4a"
     static let bubbleFilename = "bubble.json"
+    static let finalFilename = FinalCompositor.finalFilename
 
     /// Convenience overload used by the recording pipeline — takes a
     /// `RecordedSession` and forwards to the URL-based entry point.
@@ -76,17 +87,25 @@ enum RawExporter {
             sourceBubbleTimelineURL: session.bubbleTimelineURL,
             to: destination,
             demuxAudio: demuxAudio,
+            pointBounds: nil,
             completion: completion)
     }
 
+    /// `pointBounds` is the coordinate space `BubbleTimeline` frames live in —
+    /// pass `nil` to default to `UIScreen.main.bounds.size` (the space the
+    /// live bubble was logged in). Tests override it to decouple from device
+    /// geometry.
     static func export(
         sourceScreenURL: URL,
         sourceCameraURL: URL,
         sourceBubbleTimelineURL: URL,
         to destination: URL,
         demuxAudio: Bool,
+        pointBounds: CGSize? = nil,
         completion: @escaping (Result<RawExportBundle, Error>) -> Void
     ) {
+        let resolvedBounds = pointBounds ?? UIScreen.main.bounds.size
+
         let copied: CopyResult
         do {
             copied = try copySourceFiles(
@@ -100,7 +119,7 @@ enum RawExporter {
         }
 
         guard demuxAudio else {
-            completion(.success(copied.bundle(audioURL: nil)))
+            composeFinal(copied: copied, audioURL: nil, pointBounds: resolvedBounds, completion: completion)
             return
         }
 
@@ -111,18 +130,56 @@ enum RawExporter {
                 completion(.failure(error))
             case .success(nil):
                 // Source had no audio — nothing to strip from the screen copy.
-                completion(.success(copied.bundle(audioURL: nil)))
+                composeFinal(copied: copied, audioURL: nil, pointBounds: resolvedBounds, completion: completion)
             case .success(let audioURL?):
                 // Audio was moved into audio.m4a — re-export screen.mov as
                 // video-only so the mic lives in exactly one place.
                 stripAudio(from: copied.screenURL) { stripResult in
                     switch stripResult {
                     case .success:
-                        completion(.success(copied.bundle(audioURL: audioURL)))
+                        composeFinal(copied: copied, audioURL: audioURL, pointBounds: resolvedBounds, completion: completion)
                     case .failure(let error):
                         completion(.failure(error))
                     }
                 }
+            }
+        }
+    }
+
+    // MARK: - Final compose
+
+    private static func composeFinal(
+        copied: CopyResult,
+        audioURL: URL?,
+        pointBounds: CGSize,
+        completion: @escaping (Result<RawExportBundle, Error>) -> Void
+    ) {
+        let timeline: BubbleTimeline
+        do {
+            let data = try Data(contentsOf: copied.bubbleTimelineURL)
+            timeline = try JSONDecoder().decode(BubbleTimeline.self, from: data)
+        } catch {
+            completion(.failure(Failure.bubbleTimelineReadFailed(error.localizedDescription)))
+            return
+        }
+
+        let finalURL = copied.bubbleTimelineURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(finalFilename)
+
+        FinalCompositor.compose(
+            screenURL: copied.screenURL,
+            cameraURL: copied.cameraURL,
+            audioURL: audioURL,
+            bubbleTimeline: timeline,
+            pointBounds: pointBounds,
+            to: finalURL
+        ) { result in
+            switch result {
+            case .success:
+                completion(.success(copied.bundle(audioURL: audioURL, finalURL: finalURL)))
+            case .failure(let error):
+                completion(.failure(error))
             }
         }
     }
@@ -135,12 +192,13 @@ enum RawExporter {
         let bubbleTimelineURL: URL
         let duration: CMTime
 
-        func bundle(audioURL: URL?) -> RawExportBundle {
+        func bundle(audioURL: URL?, finalURL: URL) -> RawExportBundle {
             RawExportBundle(
                 screenURL: screenURL,
                 cameraURL: cameraURL,
                 audioURL: audioURL,
                 bubbleTimelineURL: bubbleTimelineURL,
+                finalURL: finalURL,
                 duration: duration)
         }
     }

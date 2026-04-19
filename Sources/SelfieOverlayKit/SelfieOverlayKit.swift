@@ -122,9 +122,10 @@ public final class SelfieOverlayKit {
     }
 
     /// Stops recording and writes the raw tracks (screen.mov, camera.mov,
-    /// optionally a demuxed audio.m4a, and bubble.json) into `destination`.
-    /// This is the SDK's only egress path — host apps consume the bundle
-    /// directly or hand it to the companion short-form editor app.
+    /// optionally a demuxed audio.m4a, bubble.json) plus a pre-composited
+    /// `final.mov` into `destination`. This is the SDK's only egress path —
+    /// host apps consume the bundle directly or hand it to the companion
+    /// short-form editor app.
     ///
     /// `destination` must be a directory; it will be created if missing.
     /// Existing files at the four target paths are overwritten.

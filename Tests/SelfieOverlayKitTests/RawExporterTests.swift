@@ -67,7 +67,8 @@ final class RawExporterTests: XCTestCase {
             sourceCameraURL: source.cameraURL,
             sourceBubbleTimelineURL: source.bubbleTimelineURL,
             to: destination,
-            demuxAudio: demuxAudio
+            demuxAudio: demuxAudio,
+            pointBounds: CGSize(width: 64, height: 64)
         ) { result in
             switch result {
             case .success(let b): bundle = b
@@ -75,14 +76,14 @@ final class RawExporterTests: XCTestCase {
             }
             exp.fulfill()
         }
-        wait(for: [exp], timeout: 30)
+        wait(for: [exp], timeout: 60)
         if let error { throw error }
         return try XCTUnwrap(bundle)
     }
 
-    // MARK: - AC: produces screen.mov, camera.mov, bubble.json, audio.m4a
+    // MARK: - AC: produces screen.mov, camera.mov, bubble.json, audio.m4a, final.mov
 
-    func testProducesAllFourFilesWhenSourceHasAudio() throws {
+    func testProducesAllFilesWhenSourceHasAudio() throws {
         let source = try makeSource(withAudio: true)
         let destination = tempRoot.appendingPathComponent("out", isDirectory: true)
 
@@ -92,13 +93,53 @@ final class RawExporterTests: XCTestCase {
         XCTAssertTrue(fm.fileExists(atPath: bundle.screenURL.path))
         XCTAssertTrue(fm.fileExists(atPath: bundle.cameraURL.path))
         XCTAssertTrue(fm.fileExists(atPath: bundle.bubbleTimelineURL.path))
+        XCTAssertTrue(fm.fileExists(atPath: bundle.finalURL.path))
         let audioURL = try XCTUnwrap(bundle.audioURL)
         XCTAssertTrue(fm.fileExists(atPath: audioURL.path))
 
         XCTAssertEqual(bundle.screenURL.lastPathComponent, "screen.mov")
         XCTAssertEqual(bundle.cameraURL.lastPathComponent, "camera.mov")
         XCTAssertEqual(bundle.bubbleTimelineURL.lastPathComponent, "bubble.json")
+        XCTAssertEqual(bundle.finalURL.lastPathComponent, "final.mov")
         XCTAssertEqual(audioURL.lastPathComponent, "audio.m4a")
+    }
+
+    // MARK: - AC: final.mov has the expected tracks
+
+    func testFinalMovHasVideoAndAudioWhenSourceHasAudio() throws {
+        let source = try makeSource(withAudio: true)
+        let destination = tempRoot.appendingPathComponent("out", isDirectory: true)
+
+        let bundle = try runExport(source: source, destination: destination, demuxAudio: true)
+
+        let asset = AVURLAsset(url: bundle.finalURL)
+        XCTAssertFalse(asset.tracks(withMediaType: .video).isEmpty,
+                       "Expected final.mov to have a video track.")
+        XCTAssertFalse(asset.tracks(withMediaType: .audio).isEmpty,
+                       "Expected final.mov to mux audio from demuxed audio.m4a.")
+    }
+
+    func testFinalMovHasNoAudioWhenSourceHasNone() throws {
+        let source = try makeSource(withAudio: false)
+        let destination = tempRoot.appendingPathComponent("out", isDirectory: true)
+
+        let bundle = try runExport(source: source, destination: destination, demuxAudio: true)
+
+        let asset = AVURLAsset(url: bundle.finalURL)
+        XCTAssertFalse(asset.tracks(withMediaType: .video).isEmpty)
+        XCTAssertTrue(asset.tracks(withMediaType: .audio).isEmpty,
+                      "Expected final.mov to have no audio when source was silent.")
+    }
+
+    func testFinalMovMuxesEmbeddedAudioWhenNotDemuxed() throws {
+        let source = try makeSource(withAudio: true)
+        let destination = tempRoot.appendingPathComponent("out", isDirectory: true)
+
+        let bundle = try runExport(source: source, destination: destination, demuxAudio: false)
+
+        let asset = AVURLAsset(url: bundle.finalURL)
+        XCTAssertFalse(asset.tracks(withMediaType: .audio).isEmpty,
+                       "Expected final.mov to pick up embedded audio when demuxAudio=false.")
     }
 
     // MARK: - AC: audio is stripped from screen.mov when demuxAudio=true
