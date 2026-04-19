@@ -7,9 +7,10 @@ import Foundation
 /// NLE (Premiere, FCP, Resolve) instead of the in-app editor.
 public struct RawExportBundle {
 
-    /// ReplayKit screen capture (.mov). Contains the mic audio when the
-    /// recording was started with `withMicrophone: true` — even when
-    /// `audioURL` is non-nil, the mic remains embedded here as well.
+    /// ReplayKit screen capture (.mov). Video-only when `audioURL` is non-nil
+    /// — the mic audio is moved into `audio.m4a` so the two live in exactly
+    /// one place each. When `demuxAudio` was passed as `false`, the mic
+    /// remains embedded here instead.
     public let screenURL: URL
 
     /// Front-camera selfie (.mov), video-only.
@@ -17,6 +18,7 @@ public struct RawExportBundle {
 
     /// Demuxed mic audio (.m4a). `nil` when the recording was started
     /// without a microphone, or when the caller passed `demuxAudio: false`.
+    /// When non-nil, the audio is no longer embedded in `screenURL`.
     public let audioURL: URL?
 
     /// `bubble.json` — selfie position, size, shape, mirror, and opacity
@@ -39,6 +41,7 @@ enum RawExporter {
         case destinationNotADirectory(URL)
         case missingSourceFile(URL)
         case audioExportFailed(String)
+        case audioStripFailed(String)
 
         var errorDescription: String? {
             switch self {
@@ -48,6 +51,8 @@ enum RawExporter {
                 return "Source file missing for raw export: \(url.lastPathComponent)"
             case .audioExportFailed(let reason):
                 return "Audio demux failed: \(reason)"
+            case .audioStripFailed(let reason):
+                return "Failed to strip audio from screen recording: \(reason)"
             }
         }
     }
@@ -79,10 +84,22 @@ enum RawExporter {
         let audioDestination = destination.appendingPathComponent(audioFilename)
         demuxAudioIfPresent(from: copied.screenURL, to: audioDestination) { audioResult in
             switch audioResult {
-            case .success(let audioURL):
-                completion(.success(copied.bundle(audioURL: audioURL)))
             case .failure(let error):
                 completion(.failure(error))
+            case .success(nil):
+                // Source had no audio — nothing to strip from the screen copy.
+                completion(.success(copied.bundle(audioURL: nil)))
+            case .success(let audioURL?):
+                // Audio was moved into audio.m4a — re-export screen.mov as
+                // video-only so the mic lives in exactly one place.
+                stripAudio(from: copied.screenURL) { stripResult in
+                    switch stripResult {
+                    case .success:
+                        completion(.success(copied.bundle(audioURL: audioURL)))
+                    case .failure(let error):
+                        completion(.failure(error))
+                    }
+                }
             }
         }
     }
@@ -186,6 +203,84 @@ enum RawExporter {
                         session.error?.localizedDescription ?? "unknown")))
                 default:
                     completion(.failure(Failure.audioExportFailed(
+                        "unexpected status \(session.status.rawValue)")))
+                }
+            }
+        }
+    }
+
+    // MARK: - Audio strip
+
+    /// Re-exports `videoURL` in place with only its video tracks (passthrough,
+    /// no re-encode). Used after the audio has been demuxed to `audio.m4a` so
+    /// the mic doesn't end up embedded in screen.mov as well.
+    private static func stripAudio(
+        from videoURL: URL,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        let asset = AVURLAsset(url: videoURL)
+        asset.loadValuesAsynchronously(forKeys: ["tracks", "duration"]) {
+            var statusError: NSError?
+            let status = asset.statusOfValue(forKey: "tracks", error: &statusError)
+            guard status == .loaded else {
+                completion(.failure(Failure.audioStripFailed(
+                    statusError?.localizedDescription ?? "track load status \(status.rawValue)")))
+                return
+            }
+
+            let videoTracks = asset.tracks(withMediaType: .video)
+            guard !videoTracks.isEmpty else {
+                completion(.failure(Failure.audioStripFailed("no video tracks in source")))
+                return
+            }
+
+            let composition = AVMutableComposition()
+            let timeRange = CMTimeRange(start: .zero, duration: asset.duration)
+            for track in videoTracks {
+                guard let compTrack = composition.addMutableTrack(
+                    withMediaType: .video,
+                    preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
+                do {
+                    try compTrack.insertTimeRange(timeRange, of: track, at: .zero)
+                    compTrack.preferredTransform = track.preferredTransform
+                } catch {
+                    completion(.failure(Failure.audioStripFailed(error.localizedDescription)))
+                    return
+                }
+            }
+
+            let tempURL = videoURL.deletingLastPathComponent()
+                .appendingPathComponent(".tmp-strip-\(UUID().uuidString).mov")
+            guard let session = AVAssetExportSession(
+                asset: composition, presetName: AVAssetExportPresetPassthrough) else {
+                completion(.failure(Failure.audioStripFailed("Passthrough preset unavailable")))
+                return
+            }
+            session.outputURL = tempURL
+            session.outputFileType = .mov
+            session.exportAsynchronously {
+                let fm = FileManager.default
+                switch session.status {
+                case .completed:
+                    do {
+                        try? fm.removeItem(at: videoURL)
+                        try fm.moveItem(at: tempURL, to: videoURL)
+                        completion(.success(()))
+                    } catch {
+                        try? fm.removeItem(at: tempURL)
+                        completion(.failure(Failure.audioStripFailed(
+                            "replace failed: \(error.localizedDescription)")))
+                    }
+                case .cancelled:
+                    try? fm.removeItem(at: tempURL)
+                    completion(.failure(Failure.audioStripFailed("cancelled")))
+                case .failed:
+                    try? fm.removeItem(at: tempURL)
+                    completion(.failure(Failure.audioStripFailed(
+                        session.error?.localizedDescription ?? "unknown")))
+                default:
+                    try? fm.removeItem(at: tempURL)
+                    completion(.failure(Failure.audioStripFailed(
                         "unexpected status \(session.status.rawValue)")))
                 }
             }

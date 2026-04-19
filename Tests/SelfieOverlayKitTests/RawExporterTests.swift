@@ -77,6 +77,39 @@ final class RawExporterTests: XCTestCase {
         XCTAssertEqual(audioURL.lastPathComponent, "audio.m4a")
     }
 
+    // MARK: - AC: audio is stripped from screen.mov when demuxAudio=true
+
+    func testStripsAudioFromScreenWhenDemuxed() throws {
+        let project = try makeProject(withAudio: true)
+        let destination = tempRoot.appendingPathComponent("out", isDirectory: true)
+
+        let bundle = try runExport(project: project, destination: destination, demuxAudio: true)
+
+        let strippedAsset = AVURLAsset(url: bundle.screenURL)
+        XCTAssertTrue(strippedAsset.tracks(withMediaType: .audio).isEmpty,
+                      "Expected no audio tracks in screen.mov after demux+strip.")
+        XCTAssertFalse(strippedAsset.tracks(withMediaType: .video).isEmpty,
+                       "Expected video tracks to be preserved in screen.mov.")
+
+        let audioAsset = AVURLAsset(url: try XCTUnwrap(bundle.audioURL))
+        XCTAssertFalse(audioAsset.tracks(withMediaType: .audio).isEmpty,
+                       "Expected audio tracks in audio.m4a.")
+    }
+
+    // MARK: - AC: audio remains embedded in screen.mov when demuxAudio=false
+
+    func testLeavesAudioInScreenWhenNotDemuxed() throws {
+        let project = try makeProject(withAudio: true)
+        let destination = tempRoot.appendingPathComponent("out", isDirectory: true)
+
+        let bundle = try runExport(project: project, destination: destination, demuxAudio: false)
+
+        XCTAssertNil(bundle.audioURL)
+        let asset = AVURLAsset(url: bundle.screenURL)
+        XCTAssertFalse(asset.tracks(withMediaType: .audio).isEmpty,
+                       "Expected audio to remain embedded in screen.mov when demuxAudio=false.")
+    }
+
     // MARK: - AC: audioURL nil when source has no audio
 
     func testReturnsNilAudioURLWhenSourceHasNoAudio() throws {
