@@ -16,6 +16,7 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertTrue(store.mirror)
         XCTAssertEqual(store.opacity, 1.0)
         XCTAssertEqual(store.size, 140)
+        XCTAssertFalse(store.useRawExport)
     }
 
     func testPersistenceRoundTrip() {
@@ -31,6 +32,7 @@ final class SettingsStoreTests: XCTestCase {
         writer.position = CGPoint(x: 40, y: 60)
         writer.borderWidth = 4
         writer.borderHue = 0.1
+        writer.useRawExport = true
 
         let reader = SettingsStore(defaults: defaults)
         XCTAssertEqual(reader.shape, .roundedRect)
@@ -40,6 +42,7 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(reader.position, CGPoint(x: 40, y: 60))
         XCTAssertEqual(reader.borderWidth, 4)
         XCTAssertEqual(reader.borderHue, 0.1, accuracy: 0.0001)
+        XCTAssertTrue(reader.useRawExport)
     }
 
     func testResetRestoresDefaults() {
@@ -48,9 +51,11 @@ final class SettingsStoreTests: XCTestCase {
         store.shape = .rect
         store.mirror = false
         store.opacity = 0.3
+        store.useRawExport = true
         store.reset()
         XCTAssertEqual(store.shape, .circle)
         XCTAssertTrue(store.mirror)
         XCTAssertEqual(store.opacity, 1.0)
+        XCTAssertFalse(store.useRawExport)
     }
 }

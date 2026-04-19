@@ -30,6 +30,7 @@ public final class SettingsStore: ObservableObject {
         static let borderWidth = "SelfieOverlay.borderWidth"
         static let borderHue = "SelfieOverlay.borderHue"
         static let hideDuringRecording = "SelfieOverlay.hideDuringRecording"
+        static let useRawExport = "SelfieOverlay.useRawExport"
     }
 
     private let defaults: UserDefaults
@@ -77,6 +78,15 @@ public final class SettingsStore: ObservableObject {
         didSet { defaults.set(hideDuringRecording, forKey: Key.hideDuringRecording) }
     }
 
+    /// When true, the bubble's stop-recording controls skip the in-app editor and
+    /// instead write the raw screen / camera / audio / bubble-timeline files into a
+    /// dedicated folder, then hand the resulting `RawExportBundle` to
+    /// `SelfieOverlayKit.shared.onRawExportComplete` for the host app to consume.
+    /// When no callback is wired the files are still written but no UI is presented.
+    @Published public var useRawExport: Bool {
+        didSet { defaults.set(useRawExport, forKey: Key.useRawExport) }
+    }
+
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
 
@@ -95,6 +105,7 @@ public final class SettingsStore: ObservableObject {
         self.borderWidth = CGFloat(defaults.object(forKey: Key.borderWidth) as? Double ?? 2)
         self.borderHue = defaults.object(forKey: Key.borderHue) as? Double ?? 0.58
         self.hideDuringRecording = defaults.object(forKey: Key.hideDuringRecording) as? Bool ?? false
+        self.useRawExport = defaults.object(forKey: Key.useRawExport) as? Bool ?? false
     }
 
     /// Reset all settings to defaults.
@@ -107,5 +118,6 @@ public final class SettingsStore: ObservableObject {
         borderWidth = 2
         borderHue = 0.58
         hideDuringRecording = false
+        useRawExport = false
     }
 }

@@ -16,6 +16,24 @@ public final class SelfieOverlayKit {
 
     public private(set) var isVisible: Bool = false
 
+    /// Invoked on the main queue whenever the bubble's stop-recording controls
+    /// finish a raw export (i.e. when `settings.useRawExport == true`). The host
+    /// app is responsible for moving / sharing / deleting the files at the URLs
+    /// in the bundle — the SDK writes them to its own Application Support
+    /// subfolder and never auto-cleans them.
+    ///
+    /// Leaving this nil while `useRawExport` is enabled is supported (the files
+    /// are still written) but unreferenced — the host app has no way to find them.
+    public var onRawExportComplete: ((RawExportBundle) -> Void)? {
+        didSet { controller.onRawExportComplete = onRawExportComplete }
+    }
+
+    /// Invoked on the main queue when a raw export fails. Surfaces low-storage,
+    /// permission, and demux failures so host apps can show their own error UI.
+    public var onRawExportFailed: ((SelfieOverlayError) -> Void)? {
+        didSet { controller.onRawExportFailed = onRawExportFailed }
+    }
+
     private init() {
         recorder.setOverlayHidden = { [weak self] hidden in
             self?.controller.setBubbleHidden(hidden)

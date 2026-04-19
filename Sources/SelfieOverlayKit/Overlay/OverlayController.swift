@@ -19,6 +19,13 @@ final class OverlayController {
     /// The SDK wires this to its public `stop()` so `isVisible` stays in sync.
     var onTurnOffRequested: (() -> Void)?
 
+    /// Forwarded from `SelfieOverlayKit.onRawExportComplete` so the controller
+    /// can hand the bundle off to the host app after a raw export.
+    var onRawExportComplete: ((RawExportBundle) -> Void)?
+
+    /// Forwarded from `SelfieOverlayKit.onRawExportFailed`.
+    var onRawExportFailed: ((SelfieOverlayError) -> Void)?
+
     private let cameraSession = CameraSession()
     private weak var hostWindow: UIWindow?
     private var overlayWindow: PassthroughWindow?
@@ -151,11 +158,56 @@ final class OverlayController {
 
     private func stopRecordingFromStealth() {
         guard let recorder, recorder.isRecording else { return }
+        stopRecording(via: recorder)
+    }
+
+    /// Branches between the editor flow and the raw-export flow based on
+    /// `settings.useRawExport`. Used by the stealth stop button and the
+    /// config panel's record toggle so both paths honor the same setting.
+    private func stopRecording(via recorder: RecordingController) {
+        if settingsStore.useRawExport {
+            guard let destination = nextRawExportDestination() else {
+                DebugLog.log("pipeline", "raw export destination unavailable; falling back to editor")
+                stopAndPresentEditor(via: recorder)
+                return
+            }
+            recorder.stopAndExportRaw(to: destination, demuxAudio: true) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .success(let bundle):
+                    self.onRawExportComplete?(bundle)
+                case .failure(let error):
+                    DebugLog.log("pipeline", "raw export failed: \(error.localizedDescription)")
+                    self.onRawExportFailed?(error)
+                }
+            }
+        } else {
+            stopAndPresentEditor(via: recorder)
+        }
+    }
+
+    private func stopAndPresentEditor(via recorder: RecordingController) {
         guard let top = topViewController() else {
             recorder.stop(completion: nil)
             return
         }
         recorder.stopAndPresentEditor(from: top, completion: nil)
+    }
+
+    /// `Application Support/SelfieOverlayKit/RawExports/<uuid>/`. The folder is
+    /// created lazily by `RawExporter`; we just compute the path. Host apps own
+    /// cleanup once the bundle has been delivered via `onRawExportComplete`.
+    private func nextRawExportDestination() -> URL? {
+        let fm = FileManager.default
+        guard let support = try? fm.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true) else { return nil }
+        return support
+            .appendingPathComponent("SelfieOverlayKit", isDirectory: true)
+            .appendingPathComponent("RawExports", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
     }
 
     // MARK: - Settings sheet
@@ -341,11 +393,7 @@ final class OverlayController {
         guard let recorder else { return }
         if recorder.isRecording {
             hideConfigPanel()
-            guard let top = topViewController() else {
-                recorder.stop(completion: nil)
-                return
-            }
-            recorder.stopAndPresentEditor(from: top, completion: nil)
+            stopRecording(via: recorder)
         } else {
             hideConfigPanel()
             recorder.start(withMicrophone: true, completion: nil)
