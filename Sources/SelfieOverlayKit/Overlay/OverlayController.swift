@@ -35,6 +35,9 @@ final class OverlayController {
     private var actionRingContainer: BubbleActionRingContainerView?
     private var actionRingState: BubbleActionRingState?
     private var actionRingDismissCatcher: DismissCatcherView?
+    private var activeToast: ToastView?
+    private var toastDismissWorkItem: DispatchWorkItem?
+    private var wasRecording = false
 
     init() {
         NotificationCenter.default.addObserver(
@@ -97,13 +100,21 @@ final class OverlayController {
                     }
                 } else {
                     self.setStealthActive(false)
+                    if self.wasRecording {
+                        self.showToast(message: "Recording saved", symbolName: "checkmark.circle.fill")
+                    }
                 }
+                self.wasRecording = isRecording
             }
     }
 
     func hide() {
         hideActionRing(animated: false)
         hideConfigPanel()
+        toastDismissWorkItem?.cancel()
+        toastDismissWorkItem = nil
+        activeToast?.removeFromSuperview()
+        activeToast = nil
         cameraSession.stop()
         bubble?.removeFromSuperview()
         bubble = nil
@@ -212,6 +223,45 @@ final class OverlayController {
         let host = UIHostingController(rootView: view)
         host.modalPresentationStyle = .formSheet
         presenter.present(host, animated: true)
+    }
+
+    // MARK: - Toast
+
+    private func showToast(message: String, symbolName: String, duration: TimeInterval = 1.8) {
+        guard let overlayWindow, let root = overlayWindow.rootViewController else { return }
+
+        activeToast?.removeFromSuperview()
+        toastDismissWorkItem?.cancel()
+
+        let toast = ToastView(message: message, symbolName: symbolName)
+        toast.translatesAutoresizingMaskIntoConstraints = false
+        root.view.addSubview(toast)
+        NSLayoutConstraint.activate([
+            toast.centerXAnchor.constraint(equalTo: root.view.centerXAnchor),
+            toast.topAnchor.constraint(equalTo: root.view.safeAreaLayoutGuide.topAnchor, constant: 12),
+        ])
+
+        toast.alpha = 0
+        toast.transform = CGAffineTransform(translationX: 0, y: -8)
+        UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseOut]) {
+            toast.alpha = 1
+            toast.transform = .identity
+        }
+
+        activeToast = toast
+
+        let dismiss = DispatchWorkItem { [weak self, weak toast] in
+            guard let toast else { return }
+            UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseIn], animations: {
+                toast.alpha = 0
+                toast.transform = CGAffineTransform(translationX: 0, y: -8)
+            }, completion: { _ in
+                toast.removeFromSuperview()
+                if self?.activeToast === toast { self?.activeToast = nil }
+            })
+        }
+        toastDismissWorkItem = dismiss
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: dismiss)
     }
 
     // MARK: - Action ring
