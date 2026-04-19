@@ -39,6 +39,29 @@ public final class BubbleOverlayRenderer {
         }
     }
 
+    /// Per-clip transform projected onto the canvas. Shared by both the
+    /// screen and camera layers: the renderer crops the source to `cropRect`
+    /// (normalized 0..1), scales by `scale`, and translates by `offset`
+    /// (in output pixels, relative to the layer's natural centre).
+    public struct LayerTransform: Equatable {
+        public var cropRect: CGRect
+        public var scale: CGFloat
+        public var offset: CGPoint
+
+        public static let identity = LayerTransform(
+            cropRect: CGRect(x: 0, y: 0, width: 1, height: 1),
+            scale: 1,
+            offset: .zero)
+
+        public init(cropRect: CGRect, scale: CGFloat, offset: CGPoint) {
+            self.cropRect = cropRect
+            self.scale = scale
+            self.offset = offset
+        }
+
+        var isIdentity: Bool { self == .identity }
+    }
+
     public init() {}
 
     // MARK: - Public API
@@ -50,15 +73,46 @@ public final class BubbleOverlayRenderer {
     /// `screenScale` is the points→pixels factor of the bubble frame
     /// (typically `UIScreen.main.scale`); `outputSize` is the destination
     /// pixel size.
+    ///
+    /// `screenTransform` / `cameraTransform` apply per-layer crop/scale/
+    /// translate on top of the default "screen fills canvas, camera fills
+    /// its bubble frame" behavior. Identity transforms (the default) keep
+    /// the fast path byte-identical to the pre-feature behavior.
+    /// `cameraShapeOverride == .fullscreen` forces the camera to cover the
+    /// full canvas regardless of `state.frame`.
     public func render(screen: CVPixelBuffer,
                        camera: CVPixelBuffer?,
                        state: State?,
                        screenScale: CGFloat,
                        outputSize: CGSize,
+                       screenTransform: LayerTransform = .identity,
+                       cameraTransform: LayerTransform = .identity,
+                       cameraShapeOverride: CameraLayerShape? = nil,
+                       backgroundColor: CIColor = CIColor(red: 0, green: 0, blue: 0),
                        into dest: CVPixelBuffer,
                        context: CIContext) {
         let screenImage = CIImage(cvPixelBuffer: screen)
-        var composite = screenImage
+        let canvasRect = CGRect(origin: .zero, size: outputSize)
+        var composite: CIImage
+
+        if screenTransform.isIdentity {
+            // Fast path: identity transform keeps the pre-feature code exact
+            // (no background fill, no crop filter, no aspect math). Covers
+            // every un-edited project so performance and rendered pixels are
+            // unchanged for them.
+            composite = screenImage
+        } else {
+            let placedRect = placedRect(natural: canvasRect, transform: screenTransform)
+            let contentSize = CGSize(width: placedRect.width, height: placedRect.height)
+            let content = aspectFill(source: screenImage,
+                                     normalizedCrop: screenTransform.cropRect,
+                                     targetSize: contentSize)
+            let translated = content.transformed(
+                by: CGAffineTransform(translationX: placedRect.origin.x,
+                                      y: placedRect.origin.y))
+            let background = CIImage(color: backgroundColor).cropped(to: canvasRect)
+            composite = translated.composited(over: background)
+        }
 
         if let state, let camera {
             let cameraImage = CIImage(cvPixelBuffer: camera)
@@ -66,16 +120,71 @@ public final class BubbleOverlayRenderer {
                 camera: cameraImage,
                 state: state,
                 screenScale: screenScale,
-                outputSize: outputSize) {
-                composite = bubble.composited(over: screenImage)
+                outputSize: outputSize,
+                transform: cameraTransform,
+                shapeOverride: cameraShapeOverride) {
+                composite = bubble.composited(over: composite)
             }
         }
 
         context.render(
             composite,
             to: dest,
-            bounds: CGRect(origin: .zero, size: outputSize),
+            bounds: canvasRect,
             colorSpace: CGColorSpaceCreateDeviceRGB())
+    }
+
+    // The on-canvas rect a layer lands in after its `LayerTransform` is
+    // applied. `natural` is the layer's identity placement rect (full canvas
+    // for the screen; bubble-in-pixels for the camera). Y is kept in CIImage
+    // orientation (origin bottom-left), so the caller doesn't have to
+    // re-flip for the camera. `offset.y` is flipped here to match UI "down =
+    // positive" expectations.
+    private func placedRect(natural: CGRect, transform: LayerTransform) -> CGRect {
+        let w = natural.width * transform.scale
+        let h = natural.height * transform.scale
+        let x = natural.midX - w / 2 + transform.offset.x
+        let y = natural.midY - h / 2 - transform.offset.y
+        return CGRect(x: x, y: y, width: w, height: h)
+    }
+
+    // Crop the source to `normalizedCrop` (a 0..1 sub-rect), aspect-fill the
+    // result into `targetSize`, and return the image positioned at origin.
+    // Mirrors the aspect-fill + centre-crop math that `makeBubbleImage`
+    // originally did inline for the camera bubble, generalized so it can
+    // also drive the screen layer.
+    private func aspectFill(source: CIImage,
+                            normalizedCrop: CGRect,
+                            targetSize: CGSize) -> CIImage {
+        let srcExtent = source.extent
+        let cropped: CIImage
+        if normalizedCrop == CGRect(x: 0, y: 0, width: 1, height: 1) {
+            cropped = source
+        } else {
+            let subRect = CGRect(
+                x: srcExtent.origin.x + normalizedCrop.origin.x * srcExtent.width,
+                y: srcExtent.origin.y + normalizedCrop.origin.y * srcExtent.height,
+                width: normalizedCrop.width * srcExtent.width,
+                height: normalizedCrop.height * srcExtent.height)
+            cropped = source.cropped(to: subRect)
+                .transformed(by: CGAffineTransform(translationX: -subRect.minX,
+                                                   y: -subRect.minY))
+        }
+
+        let cExtent = cropped.extent
+        guard cExtent.width > 0, cExtent.height > 0 else { return cropped }
+        let fillScale = max(targetSize.width / cExtent.width,
+                            targetSize.height / cExtent.height)
+        let scaled = cropped.transformed(
+            by: CGAffineTransform(scaleX: fillScale, y: fillScale))
+        let sExtent = scaled.extent
+        let cropX = sExtent.minX + (sExtent.width - targetSize.width) / 2
+        let cropY = sExtent.minY + (sExtent.height - targetSize.height) / 2
+        let localRect = CGRect(x: cropX, y: cropY,
+                               width: targetSize.width, height: targetSize.height)
+        return scaled.cropped(to: localRect)
+            .transformed(by: CGAffineTransform(translationX: -localRect.minX,
+                                               y: -localRect.minY))
     }
 
     // MARK: - Bubble image composition
@@ -83,36 +192,48 @@ public final class BubbleOverlayRenderer {
     private func makeBubbleImage(camera: CIImage,
                                  state: State,
                                  screenScale: CGFloat,
-                                 outputSize: CGSize) -> CIImage? {
-        let widthPx = (state.frame.width * screenScale).rounded()
-        let heightPx = (state.frame.height * screenScale).rounded()
-        guard widthPx > 1, heightPx > 1 else { return nil }
+                                 outputSize: CGSize,
+                                 transform: LayerTransform = .identity,
+                                 shapeOverride: CameraLayerShape? = nil) -> CIImage? {
+        // The bubble's *natural* on-canvas rect — either the recording-time
+        // frame from `state`, or the full canvas when the editor forces
+        // fullscreen. Y is in CIImage orientation (origin bottom-left).
+        let naturalRect: CGRect
+        if shapeOverride == .fullscreen {
+            naturalRect = CGRect(origin: .zero, size: outputSize)
+        } else {
+            let widthPx = (state.frame.width * screenScale).rounded()
+            let heightPx = (state.frame.height * screenScale).rounded()
+            guard widthPx > 1, heightPx > 1 else { return nil }
+            let x = state.frame.origin.x * screenScale
+            let y = outputSize.height -
+                (state.frame.origin.y + state.frame.height) * screenScale
+            naturalRect = CGRect(x: x, y: y, width: widthPx, height: heightPx)
+        }
 
         let camExtent = camera.extent
         guard camExtent.width > 0, camExtent.height > 0 else { return nil }
 
-        let fillScale = max(widthPx / camExtent.width, heightPx / camExtent.height)
-        var bubble = camera.transformed(by: CGAffineTransform(scaleX: fillScale, y: fillScale))
+        // Apply the user's canvasScale + canvasOffset to the natural rect.
+        let placedRect = placedRect(natural: naturalRect, transform: transform)
+        let bubbleSize = CGSize(width: placedRect.width.rounded(),
+                                height: placedRect.height.rounded())
+        guard bubbleSize.width > 1, bubbleSize.height > 1 else { return nil }
 
-        let scaledExtent = bubble.extent
-        let cropX = scaledExtent.minX + (scaledExtent.width - widthPx) / 2
-        let cropY = scaledExtent.minY + (scaledExtent.height - heightPx) / 2
-        let cropRect = CGRect(x: cropX, y: cropY, width: widthPx, height: heightPx)
-        bubble = bubble
-            .cropped(to: cropRect)
-            .transformed(by: CGAffineTransform(translationX: -cropRect.minX,
-                                               y: -cropRect.minY))
+        var bubble = aspectFill(source: camera,
+                                normalizedCrop: transform.cropRect,
+                                targetSize: bubbleSize)
 
         if state.mirror {
             bubble = bubble
                 .transformed(by: CGAffineTransform(scaleX: -1, y: 1))
-                .transformed(by: CGAffineTransform(translationX: widthPx, y: 0))
+                .transformed(by: CGAffineTransform(translationX: bubbleSize.width, y: 0))
         }
 
-        let bubbleSize = CGSize(width: widthPx, height: heightPx)
+        let effectiveShape = resolveShape(state: state, override: shapeOverride)
 
-        if state.shape != .rect,
-           let mask = cachedShapeMask(size: bubbleSize, shape: state.shape) {
+        if effectiveShape != .rect,
+           let mask = cachedShapeMask(size: bubbleSize, shape: effectiveShape) {
             // CIBlendWithMask (luminance) — not CIBlendWithAlphaMask. The mask is
             // drawn as opaque black + opaque white, so its alpha channel is a
             // uniform 1 and CIBlendWithAlphaMask would treat it as "all foreground"
@@ -133,17 +254,30 @@ public final class BubbleOverlayRenderer {
 
         if state.borderWidth > 0,
            let border = cachedBorder(size: bubbleSize,
-                                     shape: state.shape,
+                                     shape: effectiveShape,
                                      lineWidthPx: state.borderWidth * screenScale,
                                      hue: state.borderHue) {
             bubble = border.composited(over: bubble)
         }
 
-        let tx = state.frame.origin.x * screenScale
-        let ty = outputSize.height - (state.frame.origin.y + state.frame.height) * screenScale
-        bubble = bubble.transformed(by: CGAffineTransform(translationX: tx, y: ty))
+        bubble = bubble.transformed(
+            by: CGAffineTransform(translationX: placedRect.origin.x,
+                                  y: placedRect.origin.y))
 
         return bubble
+    }
+
+    // Pick the shape to draw on the bubble. The editor's `CameraLayerShape`
+    // takes precedence; `fullscreen` maps to `.rect` since it's a full-canvas
+    // square with no rounding. `nil` falls through to the recording-time
+    // `state.shape`.
+    private func resolveShape(state: State, override: CameraLayerShape?) -> BubbleShape {
+        switch override {
+        case .circle: return .circle
+        case .roundedRect: return .roundedRect
+        case .rect, .fullscreen: return .rect
+        case .none: return state.shape
+        }
     }
 
     // MARK: - Mask / border caches

@@ -107,6 +107,10 @@ public final class BubbleVideoCompositor: NSObject, AVVideoCompositing {
             state: state,
             screenScale: instruction.screenScale,
             outputSize: outSize,
+            screenTransform: instruction.screenTransform,
+            cameraTransform: instruction.cameraTransform,
+            cameraShapeOverride: instruction.cameraShapeOverride,
+            backgroundColor: instruction.backgroundColor,
             into: dest,
             context: ciContext)
 

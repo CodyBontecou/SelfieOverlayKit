@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreImage
 import CoreMedia
 import Foundation
 
@@ -22,6 +23,10 @@ public final class BubbleCompositionInstruction: NSObject, AVVideoCompositionIns
     let speed: Double
     let screenScale: CGFloat
     let outputSize: CGSize
+    let screenTransform: BubbleOverlayRenderer.LayerTransform
+    let cameraTransform: BubbleOverlayRenderer.LayerTransform
+    let cameraShapeOverride: CameraLayerShape?
+    let backgroundColor: CIColor
 
     init(timeRange: CMTimeRange,
          screenTrackID: CMPersistentTrackID,
@@ -30,7 +35,11 @@ public final class BubbleCompositionInstruction: NSObject, AVVideoCompositionIns
          sourceStart: CMTime,
          speed: Double,
          screenScale: CGFloat,
-         outputSize: CGSize) {
+         outputSize: CGSize,
+         screenTransform: BubbleOverlayRenderer.LayerTransform = .identity,
+         cameraTransform: BubbleOverlayRenderer.LayerTransform = .identity,
+         cameraShapeOverride: CameraLayerShape? = nil,
+         backgroundColor: CIColor = CIColor(red: 0, green: 0, blue: 0)) {
         self.timeRange = timeRange
         self.screenTrackID = screenTrackID
         self.cameraTrackID = cameraTrackID
@@ -39,6 +48,10 @@ public final class BubbleCompositionInstruction: NSObject, AVVideoCompositionIns
         self.speed = speed
         self.screenScale = screenScale
         self.outputSize = outputSize
+        self.screenTransform = screenTransform
+        self.cameraTransform = cameraTransform
+        self.cameraShapeOverride = cameraShapeOverride
+        self.backgroundColor = backgroundColor
         self.containsTweening = bubbleTimeline.map { !$0.snapshots.isEmpty } ?? false
 
         var trackIDs: [NSValue] = [NSNumber(value: screenTrackID)]

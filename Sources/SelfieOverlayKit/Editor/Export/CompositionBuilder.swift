@@ -80,6 +80,7 @@ public enum CompositionBuilder {
         // the right source frame for the bubble compositor's instruction.
         var videoTrackIDs: [SourceID: CMPersistentTrackID] = [:]
         var screenClips: [Clip] = []
+        var cameraClips: [Clip] = []
 
         for track in timeline.tracks {
             let sourceTrack: AVAssetTrack?
@@ -97,6 +98,9 @@ public enum CompositionBuilder {
                 videoTrackIDs[track.sourceBinding] = compTrack.trackID
                 if track.sourceBinding == .screen {
                     screenClips = track.clips
+                }
+                if track.sourceBinding == .camera {
+                    cameraClips = track.clips
                 }
             }
 
@@ -120,6 +124,7 @@ public enum CompositionBuilder {
         let videoComposition = makeBubbleVideoComposition(
             for: composition,
             screenClips: screenClips,
+            cameraClips: cameraClips,
             screenTrackID: videoTrackIDs[.screen] ?? kCMPersistentTrackID_Invalid,
             cameraTrackID: videoTrackIDs[.camera],
             bubbleTimeline: bubbleTimeline,
@@ -180,6 +185,7 @@ public enum CompositionBuilder {
     private static func makeBubbleVideoComposition(
         for composition: AVMutableComposition,
         screenClips: [Clip],
+        cameraClips: [Clip],
         screenTrackID: CMPersistentTrackID,
         cameraTrackID: CMPersistentTrackID?,
         bubbleTimeline: BubbleTimeline?,
@@ -210,7 +216,9 @@ public enum CompositionBuilder {
         var instructions: [AVVideoCompositionInstructionProtocol] = []
         if screenClips.isEmpty {
             // No screen track — emit one full-span instruction so AVFoundation
-            // still has something to drive playback with.
+            // still has something to drive playback with. Grab the first
+            // camera clip for its transform, if any.
+            let cameraClip = cameraClips.first
             instructions.append(BubbleCompositionInstruction(
                 timeRange: CMTimeRange(start: .zero, duration: totalDuration),
                 screenTrackID: screenTrackID,
@@ -219,9 +227,21 @@ public enum CompositionBuilder {
                 sourceStart: .zero,
                 speed: 1.0,
                 screenScale: screenScale,
-                outputSize: renderSize))
+                outputSize: renderSize,
+                screenTransform: .identity,
+                cameraTransform: cameraClip.map(layerTransform(from:)) ?? .identity,
+                cameraShapeOverride: cameraClip?.cameraShape))
         } else {
             for clip in screenClips {
+                // Camera clip that overlaps this screen-clip's time range.
+                // Clips on the same track don't overlap by construction so
+                // the first match is the only one. Still guard with
+                // `nonEmpty` intersection so a zero-length sliver isn't
+                // picked as the owner.
+                let cameraClip = cameraClips.first { camera in
+                    let intersection = clip.timelineRange.intersection(camera.timelineRange)
+                    return !intersection.isEmpty && intersection.duration > .zero
+                }
                 instructions.append(BubbleCompositionInstruction(
                     timeRange: clip.timelineRange,
                     screenTrackID: screenTrackID,
@@ -230,10 +250,20 @@ public enum CompositionBuilder {
                     sourceStart: clip.sourceRange.start,
                     speed: clip.speed,
                     screenScale: screenScale,
-                    outputSize: renderSize))
+                    outputSize: renderSize,
+                    screenTransform: layerTransform(from: clip),
+                    cameraTransform: cameraClip.map(layerTransform(from:)) ?? .identity,
+                    cameraShapeOverride: cameraClip?.cameraShape))
             }
         }
         video.instructions = instructions
         return video
+    }
+
+    private static func layerTransform(from clip: Clip) -> BubbleOverlayRenderer.LayerTransform {
+        BubbleOverlayRenderer.LayerTransform(
+            cropRect: clip.cropRect,
+            scale: clip.canvasScale,
+            offset: clip.canvasOffset)
     }
 }
