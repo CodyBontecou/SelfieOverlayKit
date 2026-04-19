@@ -109,6 +109,26 @@ public final class SelfieOverlayKit {
                               completion: ((Result<EditorProject, SelfieOverlayError>) -> Void)? = nil) {
         recorder.stopAndPresentEditor(from: presenter, completion: completion)
     }
+
+    /// Stops recording and writes the raw tracks (screen.mov, camera.mov,
+    /// optionally a demuxed audio.m4a, and bubble.json) into `destination`,
+    /// skipping the in-app editor. Use this when the host app intends to do
+    /// its own editing in an external NLE.
+    ///
+    /// `destination` must be a directory; it will be created if missing.
+    /// Existing files at the four target paths are overwritten.
+    ///
+    /// When `demuxAudio` is true and the recording was started with the
+    /// microphone, the mic audio is exported as a standalone `audio.m4a`
+    /// alongside the embedded copy in `screen.mov`. When the recording was
+    /// started without a microphone, `audioURL` in the bundle will be nil.
+    public func stopRecording(exportTo destination: URL,
+                              demuxAudio: Bool = true,
+                              completion: ((Result<RawExportBundle, SelfieOverlayError>) -> Void)? = nil) {
+        recorder.stopAndExportRaw(to: destination,
+                                  demuxAudio: demuxAudio,
+                                  completion: completion)
+    }
 }
 
 // MARK: - Errors

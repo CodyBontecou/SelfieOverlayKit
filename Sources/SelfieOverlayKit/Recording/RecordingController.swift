@@ -127,6 +127,37 @@ final class RecordingController: NSObject, ObservableObject {
         }
     }
 
+    /// Stops recording and exports the raw screen / camera / mic / bubble
+    /// timeline files into `destination`, skipping the in-app editor. Used
+    /// when host apps want to edit outside the SDK.
+    func stopAndExportRaw(to destination: URL,
+                          demuxAudio: Bool,
+                          completion: ((Result<RawExportBundle, SelfieOverlayError>) -> Void)?) {
+        stop { result in
+            switch result {
+            case .failure(let error):
+                completion?(.failure(error))
+            case .success(let project):
+                RawExporter.export(project: project,
+                                   to: destination,
+                                   demuxAudio: demuxAudio) { exportResult in
+                    DispatchQueue.main.async {
+                        switch exportResult {
+                        case .success(let bundle):
+                            completion?(.success(bundle))
+                        case .failure(let error):
+                            if let selfieErr = error as? SelfieOverlayError {
+                                completion?(.failure(selfieErr))
+                            } else {
+                                completion?(.failure(.underlying(error)))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func presentEditor(for project: EditorProject, from presenter: UIViewController) {
         let editor: EditorViewController
         do {
