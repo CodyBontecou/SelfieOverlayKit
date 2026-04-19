@@ -167,9 +167,15 @@ final class PreviewCanvasView: UIView {
             pushOverride()
         case .ended, .cancelled, .failed:
             guard var s = session else { return }
+            // Read the recognizer's final scale so the gesture-end value
+            // isn't stuck at the last `.changed` tick. The system sends a
+            // trailing `.ended` with the final touch geometry and no
+            // additional `.changed` in between, so relying on the last
+            // cached factor drops the tail of the drag.
+            let finalFactor = clampScaleFactor(gesture.scale, base: s.base.scale)
             s.base = BubbleOverlayRenderer.LayerTransform(
                 cropRect: s.base.cropRect,
-                scale: clampScale(s.base.scale * s.scaleFactor),
+                scale: clampScale(s.base.scale * finalFactor),
                 offset: s.base.offset)
             s.scaleFactor = 1
             session = s
@@ -484,7 +490,16 @@ final class PreviewCanvasView: UIView {
         return timeline.tracks[loc.trackIndex].clips[loc.clipIndex]
     }
 
+    /// Test-only override: tests can't build a real AVPlayerItem with
+    /// presentation info, so they supply the render size directly. Left at
+    /// zero in production, where the `player?.currentItem` path is what
+    /// runs.
+    var testRenderSizeOverride: CGSize = .zero
+
     private func currentRenderSize() -> CGSize {
+        if testRenderSizeOverride.width > 0, testRenderSizeOverride.height > 0 {
+            return testRenderSizeOverride
+        }
         let presentation = player?.currentItem?.presentationSize ?? .zero
         if presentation.width > 0, presentation.height > 0 { return presentation }
         // Before the player item reports a presentation size (first frame
