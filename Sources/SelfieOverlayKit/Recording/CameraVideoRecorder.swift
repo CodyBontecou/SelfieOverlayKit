@@ -21,6 +21,14 @@ final class CameraVideoRecorder {
     private var input: AVAssetWriterInput?
     private var outputURL: URL?
     private var didStartSession = false
+    // Samples with PTS earlier than this are dropped. `RecordingController` wires
+    // this from `RawRecorder.onVideoStart` so the camera writer's session starts
+    // at the same wall-clock moment as ReplayKit's first screen sample — without
+    // the anchor, the first camera sample (which can be several seconds old by
+    // the time ReplayKit finishes spinning up) gets latched as the writer's
+    // session origin, producing 2-3s of black/frozen pre-roll at the head of
+    // camera.mov in QuickTime.
+    private var anchorPTS: CMTime?
 
     /// Fires once on the main queue with the first-sample PTS in `CACurrentMediaTime()`
     /// units — the same host clock `RawRecorder.onVideoStart` emits, so callers can align.
@@ -38,6 +46,7 @@ final class CameraVideoRecorder {
         outputURL = url
         didStartSession = false
         firstSamplePTS = nil
+        anchorPTS = nil
 
         do {
             let w = try AVAssetWriter(outputURL: url, fileType: .mov)
@@ -63,6 +72,18 @@ final class CameraVideoRecorder {
         }
 
         completion(.success(()))
+    }
+
+    /// Anchor the writer's session start to a host-clock PTS (same clock as
+    /// `AVCaptureVideoDataOutput` sample buffers). `RecordingController` calls
+    /// this once `RawRecorder.onVideoStart` fires so the camera and screen
+    /// .movs share a wall-clock start — camera samples captured before the
+    /// anchor (stale buffered frames, or anything produced while ReplayKit was
+    /// still spinning up) are dropped rather than written as pre-roll.
+    func anchorSession(atSourceTime anchor: CMTime) {
+        queue.async { [weak self] in
+            self?.anchorPTS = anchor
+        }
     }
 
     func stop(completion: @escaping (Result<URL, Error>) -> Void) {
@@ -108,10 +129,17 @@ final class CameraVideoRecorder {
         guard let writer else { return }
         guard CMSampleBufferDataIsReady(sample) else { return }
 
+        let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+
+        // Hold everything until the controller hands us the screen recorder's
+        // first-sample PTS, then drop anything older than that — see `anchorPTS`.
+        guard let anchor = anchorPTS, CMTimeCompare(pts, anchor) >= 0 else {
+            return
+        }
+
         if !didStartSession, writer.status == .unknown {
-            let pts = CMSampleBufferGetPresentationTimeStamp(sample)
             if writer.startWriting() {
-                writer.startSession(atSourceTime: pts)
+                writer.startSession(atSourceTime: anchor)
                 didStartSession = true
                 firstSamplePTS = pts
                 let seconds = CMTimeGetSeconds(pts)

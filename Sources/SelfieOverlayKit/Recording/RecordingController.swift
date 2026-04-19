@@ -1,3 +1,4 @@
+import CoreMedia
 import ReplayKit
 import UIKit
 import Combine
@@ -71,7 +72,13 @@ final class RecordingController: NSObject, ObservableObject {
         bubbleLogger.start(bubble: context.bubble, settings: context.settings)
 
         raw.onVideoStart = { [weak self] hostSeconds in
-            self?.videoStartAbsTime = hostSeconds
+            guard let self else { return }
+            self.videoStartAbsTime = hostSeconds
+            // Camera listener was attached before ReplayKit started delivering
+            // — anchor its writer here so the camera .mov begins at the same
+            // wall-clock moment as the screen .mov rather than 2-3s earlier.
+            let anchor = CMTime(seconds: hostSeconds, preferredTimescale: 600)
+            self.cameraRecorder.anchorSession(atSourceTime: anchor)
         }
 
         cameraRecorder.start(cameraSession: context.cameraSession) { [weak self] camResult in
