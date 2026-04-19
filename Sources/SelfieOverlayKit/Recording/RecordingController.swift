@@ -9,13 +9,14 @@ import Combine
 ///    in-app capture, while `CameraVideoRecorder` writes the raw front-camera
 ///    feed to a separate `.mov`.
 /// 3. On stop, both raw `.mov`s and the sampled `BubbleTimeline` are moved
-///    into a per-recording project folder via `ProjectStore`. Compositing is
-///    deferred to preview / export so each layer stays editable.
+///    into a per-recording session folder via `RecordingStore`, and the
+///    caller is expected to copy them out via `RawExporter.export` (the only
+///    public egress path).
 ///
 /// The camera is kept as a separate track rather than relying on ReplayKit to
 /// capture the overlay window — in-app capture misses secondary windows at
-/// high `windowLevel`s, so the selfie has to be composited from its own
-/// recording afterwards (see `CameraCompositor` / the editor pipeline).
+/// high `windowLevel`s, so the selfie is delivered as its own file for
+/// downstream editing to composite.
 final class RecordingController: NSObject, ObservableObject {
 
     struct RecordingContext {
@@ -27,27 +28,27 @@ final class RecordingController: NSObject, ObservableObject {
     private let raw = RawRecorder()
     private let cameraRecorder = CameraVideoRecorder()
     private let bubbleLogger = BubbleStateLogger()
-    private let projectStore: ProjectStore
+    private let store: RecordingStore
 
     @Published private(set) var isRecording = false
     private var videoStartAbsTime: TimeInterval?
 
     override init() {
         do {
-            self.projectStore = try ProjectStore()
+            self.store = try RecordingStore()
         } catch {
-            fatalError("Unable to create ProjectStore: \(error)")
+            fatalError("Unable to create RecordingStore: \(error)")
         }
         super.init()
     }
 
-    init(projectStore: ProjectStore) {
-        self.projectStore = projectStore
+    init(store: RecordingStore) {
+        self.store = store
         super.init()
     }
 
     /// Injected by `SelfieOverlayKit` so the controller can hide the live bubble while
-    /// the recorded video is being previewed/edited.
+    /// the recorded video is being handed back to the host app.
     var setOverlayHidden: ((Bool) -> Void)?
 
     /// Injected by `SelfieOverlayKit` to hand the controller the live camera session,
@@ -114,29 +115,9 @@ final class RecordingController: NSObject, ObservableObject {
 
     // MARK: - Stop
 
-    /// Stops the recorders, persists a fresh project, and presents the editor
-    /// shell on top of `presenter`. The completion fires with the resulting
-    /// `EditorProject` (or an error) after the editor has been presented.
-    func stopAndPresentEditor(from presenter: UIViewController,
-                              completion: ((Result<EditorProject, SelfieOverlayError>) -> Void)?) {
-        stop { [weak self, weak presenter] result in
-            switch result {
-            case .failure(let error):
-                completion?(.failure(error))
-            case .success(let project):
-                guard let self, let presenter else {
-                    completion?(.success(project))
-                    return
-                }
-                self.presentEditor(for: project, from: presenter)
-                completion?(.success(project))
-            }
-        }
-    }
-
     /// Stops recording and exports the raw screen / camera / mic / bubble
-    /// timeline files into `destination`, skipping the in-app editor. Used
-    /// when host apps want to edit outside the SDK.
+    /// timeline files into `destination`, handing a `RawExportBundle` back to
+    /// the caller.
     func stopAndExportRaw(to destination: URL,
                           demuxAudio: Bool,
                           completion: ((Result<RawExportBundle, SelfieOverlayError>) -> Void)?) {
@@ -144,8 +125,8 @@ final class RecordingController: NSObject, ObservableObject {
             switch result {
             case .failure(let error):
                 completion?(.failure(error))
-            case .success(let project):
-                RawExporter.export(project: project,
+            case .success(let session):
+                RawExporter.export(session: session,
                                    to: destination,
                                    demuxAudio: demuxAudio) { exportResult in
                     DispatchQueue.main.async {
@@ -165,28 +146,11 @@ final class RecordingController: NSObject, ObservableObject {
         }
     }
 
-    private func presentEditor(for project: EditorProject, from presenter: UIViewController) {
-        let editor: EditorViewController
-        do {
-            editor = try EditorViewController(project: project)
-        } catch {
-            DebugLog.log("pipeline", "editor init failed: \(error.localizedDescription)")
-            return
-        }
-        editor.onDismiss = { [weak self] in
-            self?.setOverlayHidden?(false)
-        }
-        let nav = UINavigationController(rootViewController: editor)
-        nav.modalPresentationStyle = .fullScreen
-        setOverlayHidden?(true)
-        presenter.present(nav, animated: true)
-    }
-
     /// Stops the recorders and moves the raw screen / camera `.mov`s plus the
-    /// sampled `BubbleTimeline` into a new project folder. Hands back an
-    /// `EditorProject` to the caller; compositing is deferred to preview /
-    /// export (see T5–T14 in the editor pipeline).
-    func stop(completion: ((Result<EditorProject, SelfieOverlayError>) -> Void)?) {
+    /// sampled `BubbleTimeline` into a new session folder. The folder lives
+    /// under Application Support and is owned by the SDK — callers should
+    /// copy tracks out via `RawExporter`, not reach into the session URL.
+    func stop(completion: ((Result<RecordedSession, SelfieOverlayError>) -> Void)?) {
         guard isRecording else {
             completion?(.failure(.recordingNotInProgress))
             return
@@ -220,7 +184,7 @@ final class RecordingController: NSObject, ObservableObject {
                     DebugLog.log("pipeline", "cameraRecorder.stop failed: \(error.localizedDescription)")
                     self.finishWithError(error, completion: completion)
                 case (.success(let rawURL), .success(let cameraURL)):
-                    self.persistProject(rawURL: rawURL,
+                    self.persistSession(rawURL: rawURL,
                                         cameraURL: cameraURL,
                                         bubbleTimeline: bubbleTimeline,
                                         completion: completion)
@@ -229,33 +193,32 @@ final class RecordingController: NSObject, ObservableObject {
         }
     }
 
-    private func persistProject(rawURL: URL,
+    private func persistSession(rawURL: URL,
                                 cameraURL: URL,
                                 bubbleTimeline: BubbleTimeline,
-                                completion: ((Result<EditorProject, SelfieOverlayError>) -> Void)?) {
+                                completion: ((Result<RecordedSession, SelfieOverlayError>) -> Void)?) {
         do {
-            let project = try projectStore.create()
+            let session = try store.create()
             let fm = FileManager.default
             // Move instead of copy: the raws live in NSTemporaryDirectory
             // and would otherwise get reaped by the OS.
-            try fm.moveItem(at: rawURL, to: project.screenURL)
-            try fm.moveItem(at: cameraURL, to: project.cameraURL)
-            try projectStore.saveBubbleTimeline(bubbleTimeline, to: project)
-            try projectStore.saveMetadata(project)
+            try fm.moveItem(at: rawURL, to: session.screenURL)
+            try fm.moveItem(at: cameraURL, to: session.cameraURL)
+            try store.saveBubbleTimeline(bubbleTimeline, to: session)
             setRecordingOnMain(false)
             DispatchQueue.main.async {
-                completion?(.success(project))
+                completion?(.success(session))
             }
         } catch {
             try? FileManager.default.removeItem(at: rawURL)
             try? FileManager.default.removeItem(at: cameraURL)
-            DebugLog.log("pipeline", "persistProject failed: \(error.localizedDescription)")
+            DebugLog.log("pipeline", "persistSession failed: \(error.localizedDescription)")
             finishWithError(error, completion: completion)
         }
     }
 
     private func finishWithError(_ error: Error,
-                                 completion: ((Result<EditorProject, SelfieOverlayError>) -> Void)?) {
+                                 completion: ((Result<RecordedSession, SelfieOverlayError>) -> Void)?) {
         setRecordingOnMain(false)
         DispatchQueue.main.async {
             if let selfieErr = error as? SelfieOverlayError {

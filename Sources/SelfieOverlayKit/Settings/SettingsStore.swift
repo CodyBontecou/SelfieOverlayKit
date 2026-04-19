@@ -44,7 +44,6 @@ public final class SettingsStore: ObservableObject {
         static let borderWidth = "SelfieOverlay.borderWidth"
         static let borderHue = "SelfieOverlay.borderHue"
         static let hideDuringRecording = "SelfieOverlay.hideDuringRecording"
-        static let useRawExport = "SelfieOverlay.useRawExport"
         static let rawExportLocation = "SelfieOverlay.rawExportLocation"
     }
 
@@ -88,18 +87,9 @@ public final class SettingsStore: ObservableObject {
 
     /// When true, the bubble is replaced by a small stop-recording affordance while
     /// recording. The selfie camera feed and bubble timeline still get captured so
-    /// the editor can show the selfie in the exported video.
+    /// the final export still shows the selfie.
     @Published public var hideDuringRecording: Bool {
         didSet { defaults.set(hideDuringRecording, forKey: Key.hideDuringRecording) }
-    }
-
-    /// When true, the bubble's stop-recording controls skip the in-app editor and
-    /// instead write the raw screen / camera / audio / bubble-timeline files into a
-    /// dedicated folder, then hand the resulting `RawExportBundle` to
-    /// `SelfieOverlayKit.shared.onRawExportComplete` for the host app to consume.
-    /// When no callback is wired the files are still written but no UI is presented.
-    @Published public var useRawExport: Bool {
-        didSet { defaults.set(useRawExport, forKey: Key.useRawExport) }
     }
 
     /// Where raw exports are written on disk. See `RawExportLocation` for the
@@ -127,7 +117,6 @@ public final class SettingsStore: ObservableObject {
         self.borderWidth = CGFloat(defaults.object(forKey: Key.borderWidth) as? Double ?? 2)
         self.borderHue = defaults.object(forKey: Key.borderHue) as? Double ?? 0.58
         self.hideDuringRecording = defaults.object(forKey: Key.hideDuringRecording) as? Bool ?? false
-        self.useRawExport = defaults.object(forKey: Key.useRawExport) as? Bool ?? false
 
         let rawLocation = defaults.string(forKey: Key.rawExportLocation) ?? RawExportLocation.documents.rawValue
         self.rawExportLocation = RawExportLocation(rawValue: rawLocation) ?? .documents
@@ -143,7 +132,6 @@ public final class SettingsStore: ObservableObject {
         borderWidth = 2
         borderHue = 0.58
         hideDuringRecording = false
-        useRawExport = false
         rawExportLocation = .documents
     }
 }

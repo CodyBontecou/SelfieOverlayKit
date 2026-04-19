@@ -4,7 +4,7 @@ import Foundation
 
 /// Output of `SelfieOverlayKit.stopRecording(exportTo:)` — the three raw
 /// tracks plus the bubble timeline JSON, suitable for editing in an external
-/// NLE (Premiere, FCP, Resolve) instead of the in-app editor.
+/// NLE (Premiere, FCP, Resolve) or the standalone short-form editor app.
 public struct RawExportBundle {
 
     /// ReplayKit screen capture (.mov). Video-only when `audioURL` is non-nil
@@ -30,10 +30,10 @@ public struct RawExportBundle {
     public let duration: CMTime
 }
 
-/// Copies a recorded `EditorProject`'s raw tracks out to a host-app-supplied
+/// Copies the raw tracks from a completed recording to a host-app-supplied
 /// destination directory and (optionally) demuxes the mic audio into a
-/// standalone .m4a. The project folder itself is left untouched — the host
-/// app is responsible for cleanup if it doesn't want the SDK's internal copy
+/// standalone .m4a. The source folder is left untouched — the host app is
+/// responsible for cleanup if it doesn't want the SDK's internal copy
 /// hanging around.
 enum RawExporter {
 
@@ -62,15 +62,38 @@ enum RawExporter {
     static let audioFilename = "audio.m4a"
     static let bubbleFilename = "bubble.json"
 
+    /// Convenience overload used by the recording pipeline — takes a
+    /// `RecordedSession` and forwards to the URL-based entry point.
     static func export(
-        project: EditorProject,
+        session: RecordedSession,
+        to destination: URL,
+        demuxAudio: Bool,
+        completion: @escaping (Result<RawExportBundle, Error>) -> Void
+    ) {
+        export(
+            sourceScreenURL: session.screenURL,
+            sourceCameraURL: session.cameraURL,
+            sourceBubbleTimelineURL: session.bubbleTimelineURL,
+            to: destination,
+            demuxAudio: demuxAudio,
+            completion: completion)
+    }
+
+    static func export(
+        sourceScreenURL: URL,
+        sourceCameraURL: URL,
+        sourceBubbleTimelineURL: URL,
         to destination: URL,
         demuxAudio: Bool,
         completion: @escaping (Result<RawExportBundle, Error>) -> Void
     ) {
         let copied: CopyResult
         do {
-            copied = try copySourceFiles(project: project, to: destination)
+            copied = try copySourceFiles(
+                sourceScreenURL: sourceScreenURL,
+                sourceCameraURL: sourceCameraURL,
+                sourceBubbleTimelineURL: sourceBubbleTimelineURL,
+                to: destination)
         } catch {
             completion(.failure(error))
             return
@@ -122,7 +145,9 @@ enum RawExporter {
         }
     }
 
-    private static func copySourceFiles(project: EditorProject,
+    private static func copySourceFiles(sourceScreenURL: URL,
+                                        sourceCameraURL: URL,
+                                        sourceBubbleTimelineURL: URL,
                                         to destination: URL) throws -> CopyResult {
         let fm = FileManager.default
         var isDir: ObjCBool = false
@@ -134,7 +159,7 @@ enum RawExporter {
             try fm.createDirectory(at: destination, withIntermediateDirectories: true)
         }
 
-        for url in [project.screenURL, project.cameraURL, project.bubbleTimelineURL] {
+        for url in [sourceScreenURL, sourceCameraURL, sourceBubbleTimelineURL] {
             guard fm.fileExists(atPath: url.path) else {
                 throw Failure.missingSourceFile(url)
             }
@@ -147,9 +172,9 @@ enum RawExporter {
         for dest in [screenDest, cameraDest, bubbleDest] {
             try? fm.removeItem(at: dest)
         }
-        try fm.copyItem(at: project.screenURL, to: screenDest)
-        try fm.copyItem(at: project.cameraURL, to: cameraDest)
-        try fm.copyItem(at: project.bubbleTimelineURL, to: bubbleDest)
+        try fm.copyItem(at: sourceScreenURL, to: screenDest)
+        try fm.copyItem(at: sourceCameraURL, to: cameraDest)
+        try fm.copyItem(at: sourceBubbleTimelineURL, to: bubbleDest)
 
         let asset = AVURLAsset(url: screenDest)
         return CopyResult(

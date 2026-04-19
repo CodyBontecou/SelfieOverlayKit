@@ -27,7 +27,6 @@ final class OverlayController {
     var onRawExportFailed: ((SelfieOverlayError) -> Void)?
 
     private let cameraSession = CameraSession()
-    private weak var hostWindow: UIWindow?
     private var overlayWindow: PassthroughWindow?
     private var bubble: BubbleView?
     private var panelHost: UIHostingController<BubbleConfigPanel>?
@@ -58,7 +57,6 @@ final class OverlayController {
         }
 
         guard let scene = activeWindowScene() else { return }
-        hostWindow = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first
 
         let window = PassthroughWindow(windowScene: scene)
         window.windowLevel = .alert + 1
@@ -111,7 +109,6 @@ final class OverlayController {
         bubble = nil
         overlayWindow?.isHidden = true
         overlayWindow = nil
-        hostWindow = nil
     }
 
     /// Snapshot of the pieces the recorder needs to capture the camera stream and
@@ -161,37 +158,27 @@ final class OverlayController {
         stopRecording(via: recorder)
     }
 
-    /// Branches between the editor flow and the raw-export flow based on
-    /// `settings.useRawExport`. Used by the stealth stop button and the
-    /// config panel's record toggle so both paths honor the same setting.
+    /// Stops the recording and raw-exports the resulting bundle into a
+    /// per-recording folder (see `nextRawExportDestination`), delivering the
+    /// URLs to the host via `onRawExportComplete`. If the destination can't be
+    /// resolved, or the pipeline errors, `onRawExportFailed` fires instead.
     private func stopRecording(via recorder: RecordingController) {
-        if settingsStore.useRawExport {
-            guard let destination = nextRawExportDestination() else {
-                DebugLog.log("pipeline", "raw export destination unavailable; falling back to editor")
-                stopAndPresentEditor(via: recorder)
-                return
-            }
-            recorder.stopAndExportRaw(to: destination, demuxAudio: true) { [weak self] result in
-                guard let self else { return }
-                switch result {
-                case .success(let bundle):
-                    self.onRawExportComplete?(bundle)
-                case .failure(let error):
-                    DebugLog.log("pipeline", "raw export failed: \(error.localizedDescription)")
-                    self.onRawExportFailed?(error)
-                }
-            }
-        } else {
-            stopAndPresentEditor(via: recorder)
-        }
-    }
-
-    private func stopAndPresentEditor(via recorder: RecordingController) {
-        guard let top = topViewController() else {
+        guard let destination = nextRawExportDestination() else {
+            DebugLog.log("pipeline", "raw export destination unavailable; dropping recording")
+            onRawExportFailed?(.recordingUnavailable)
             recorder.stop(completion: nil)
             return
         }
-        recorder.stopAndPresentEditor(from: top, completion: nil)
+        recorder.stopAndExportRaw(to: destination, demuxAudio: true) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let bundle):
+                self.onRawExportComplete?(bundle)
+            case .failure(let error):
+                DebugLog.log("pipeline", "raw export failed: \(error.localizedDescription)")
+                self.onRawExportFailed?(error)
+            }
+        }
     }
 
     /// `<root>/SelfieOverlayKit/RawExports/<uuid>/`, where `<root>` is either
@@ -473,12 +460,6 @@ final class OverlayController {
             .compactMap { $0 as? UIWindowScene }
             .first { $0.activationState == .foregroundActive }
             ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
-    }
-
-    private func topViewController() -> UIViewController? {
-        var top = hostWindow?.rootViewController
-        while let presented = top?.presentedViewController { top = presented }
-        return top
     }
 }
 

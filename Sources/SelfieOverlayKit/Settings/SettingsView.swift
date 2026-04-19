@@ -52,14 +52,6 @@ public struct SelfieOverlaySettingsView: View {
                     }
                 }
 
-                Section {
-                    Toggle("Export raw files (skip editor)", isOn: $settings.useRawExport)
-                } header: {
-                    Text("Recording")
-                } footer: {
-                    Text("When on, stopping a recording skips the in-app editor and writes screen.mov, camera.mov, audio.m4a, and bubble.json to a folder for editing in an external app. The host app receives the files via SelfieOverlayKit.shared.onRawExportComplete.")
-                }
-
                 Section("Border") {
                     VStack(alignment: .leading) {
                         HStack {

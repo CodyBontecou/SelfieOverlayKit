@@ -6,13 +6,12 @@ import XCTest
 final class RawExporterTests: XCTestCase {
 
     private var tempRoot: URL!
-    private var store: ProjectStore!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
         tempRoot = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("RawExporterTests-\(UUID().uuidString)", isDirectory: true)
-        store = try ProjectStore(rootURL: tempRoot)
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
     }
 
     override func tearDownWithError() throws {
@@ -24,27 +23,52 @@ final class RawExporterTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func makeProject(withAudio: Bool) throws -> EditorProject {
-        let project = try store.create()
+    /// A raw "source" folder that mirrors what `RecordingController` leaves on
+    /// disk after a successful recording: screen.mov + camera.mov + bubble.json.
+    private struct Source {
+        let screenURL: URL
+        let cameraURL: URL
+        let bubbleTimelineURL: URL
+    }
+
+    private func makeSource(withAudio: Bool) throws -> Source {
+        let folder = tempRoot.appendingPathComponent("src-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+        let screenURL = folder.appendingPathComponent("screen.mov")
+        let cameraURL = folder.appendingPathComponent("camera.mov")
+        let bubbleURL = folder.appendingPathComponent("bubble.json")
+
         try TestVideoFixtures.writeBlackMOV(
-            to: project.screenURL,
+            to: screenURL,
             duration: CMTime(seconds: 1, preferredTimescale: 600),
             withSilentAudio: withAudio)
         try TestVideoFixtures.writeBlackMOV(
-            to: project.cameraURL,
+            to: cameraURL,
             duration: CMTime(seconds: 1, preferredTimescale: 600))
-        try store.saveBubbleTimeline(BubbleTimeline(snapshots: []), to: project)
-        try store.saveMetadata(project)
-        return project
+
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(BubbleTimeline(snapshots: []))
+        try data.write(to: bubbleURL, options: .atomic)
+
+        return Source(screenURL: screenURL,
+                      cameraURL: cameraURL,
+                      bubbleTimelineURL: bubbleURL)
     }
 
-    private func runExport(project: EditorProject,
+    private func runExport(source: Source,
                            destination: URL,
                            demuxAudio: Bool) throws -> RawExportBundle {
         let exp = expectation(description: "raw export")
         var bundle: RawExportBundle?
         var error: Error?
-        RawExporter.export(project: project, to: destination, demuxAudio: demuxAudio) { result in
+        RawExporter.export(
+            sourceScreenURL: source.screenURL,
+            sourceCameraURL: source.cameraURL,
+            sourceBubbleTimelineURL: source.bubbleTimelineURL,
+            to: destination,
+            demuxAudio: demuxAudio
+        ) { result in
             switch result {
             case .success(let b): bundle = b
             case .failure(let e): error = e
@@ -59,10 +83,10 @@ final class RawExporterTests: XCTestCase {
     // MARK: - AC: produces screen.mov, camera.mov, bubble.json, audio.m4a
 
     func testProducesAllFourFilesWhenSourceHasAudio() throws {
-        let project = try makeProject(withAudio: true)
+        let source = try makeSource(withAudio: true)
         let destination = tempRoot.appendingPathComponent("out", isDirectory: true)
 
-        let bundle = try runExport(project: project, destination: destination, demuxAudio: true)
+        let bundle = try runExport(source: source, destination: destination, demuxAudio: true)
 
         let fm = FileManager.default
         XCTAssertTrue(fm.fileExists(atPath: bundle.screenURL.path))
@@ -80,10 +104,10 @@ final class RawExporterTests: XCTestCase {
     // MARK: - AC: audio is stripped from screen.mov when demuxAudio=true
 
     func testStripsAudioFromScreenWhenDemuxed() throws {
-        let project = try makeProject(withAudio: true)
+        let source = try makeSource(withAudio: true)
         let destination = tempRoot.appendingPathComponent("out", isDirectory: true)
 
-        let bundle = try runExport(project: project, destination: destination, demuxAudio: true)
+        let bundle = try runExport(source: source, destination: destination, demuxAudio: true)
 
         let strippedAsset = AVURLAsset(url: bundle.screenURL)
         XCTAssertTrue(strippedAsset.tracks(withMediaType: .audio).isEmpty,
@@ -99,10 +123,10 @@ final class RawExporterTests: XCTestCase {
     // MARK: - AC: audio remains embedded in screen.mov when demuxAudio=false
 
     func testLeavesAudioInScreenWhenNotDemuxed() throws {
-        let project = try makeProject(withAudio: true)
+        let source = try makeSource(withAudio: true)
         let destination = tempRoot.appendingPathComponent("out", isDirectory: true)
 
-        let bundle = try runExport(project: project, destination: destination, demuxAudio: false)
+        let bundle = try runExport(source: source, destination: destination, demuxAudio: false)
 
         XCTAssertNil(bundle.audioURL)
         let asset = AVURLAsset(url: bundle.screenURL)
@@ -113,13 +137,12 @@ final class RawExporterTests: XCTestCase {
     // MARK: - AC: audioURL nil when source has no audio
 
     func testReturnsNilAudioURLWhenSourceHasNoAudio() throws {
-        let project = try makeProject(withAudio: false)
+        let source = try makeSource(withAudio: false)
         let destination = tempRoot.appendingPathComponent("out", isDirectory: true)
 
-        let bundle = try runExport(project: project, destination: destination, demuxAudio: true)
+        let bundle = try runExport(source: source, destination: destination, demuxAudio: true)
 
         XCTAssertNil(bundle.audioURL)
-        // Ensure we didn't write a stray empty audio.m4a.
         let strayAudio = destination.appendingPathComponent("audio.m4a")
         XCTAssertFalse(FileManager.default.fileExists(atPath: strayAudio.path))
     }
@@ -127,10 +150,10 @@ final class RawExporterTests: XCTestCase {
     // MARK: - AC: demuxAudio=false skips audio extraction even with audio source
 
     func testSkipsAudioWhenDemuxFalse() throws {
-        let project = try makeProject(withAudio: true)
+        let source = try makeSource(withAudio: true)
         let destination = tempRoot.appendingPathComponent("out", isDirectory: true)
 
-        let bundle = try runExport(project: project, destination: destination, demuxAudio: false)
+        let bundle = try runExport(source: source, destination: destination, demuxAudio: false)
 
         XCTAssertNil(bundle.audioURL)
         let strayAudio = destination.appendingPathComponent("audio.m4a")
@@ -140,11 +163,11 @@ final class RawExporterTests: XCTestCase {
     // MARK: - Destination handling
 
     func testCreatesDestinationDirectoryIfMissing() throws {
-        let project = try makeProject(withAudio: false)
+        let source = try makeSource(withAudio: false)
         let destination = tempRoot.appendingPathComponent("nested/does/not/exist", isDirectory: true)
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
 
-        _ = try runExport(project: project, destination: destination, demuxAudio: false)
+        _ = try runExport(source: source, destination: destination, demuxAudio: false)
 
         var isDir: ObjCBool = false
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path, isDirectory: &isDir))
@@ -152,7 +175,7 @@ final class RawExporterTests: XCTestCase {
     }
 
     func testOverwritesExistingDestinationFiles() throws {
-        let project = try makeProject(withAudio: false)
+        let source = try makeSource(withAudio: false)
         let destination = tempRoot.appendingPathComponent("out", isDirectory: true)
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
 
@@ -165,7 +188,7 @@ final class RawExporterTests: XCTestCase {
             try Data("stale".utf8).write(to: url)
         }
 
-        _ = try runExport(project: project, destination: destination, demuxAudio: false)
+        _ = try runExport(source: source, destination: destination, demuxAudio: false)
 
         for url in stalePaths {
             let data = try Data(contentsOf: url)
@@ -175,13 +198,19 @@ final class RawExporterTests: XCTestCase {
     }
 
     func testFailsWhenDestinationIsAFile() throws {
-        let project = try makeProject(withAudio: false)
+        let source = try makeSource(withAudio: false)
         let destination = tempRoot.appendingPathComponent("not-a-directory")
         try Data().write(to: destination)
 
         let exp = expectation(description: "raw export")
         var error: Error?
-        RawExporter.export(project: project, to: destination, demuxAudio: false) { result in
+        RawExporter.export(
+            sourceScreenURL: source.screenURL,
+            sourceCameraURL: source.cameraURL,
+            sourceBubbleTimelineURL: source.bubbleTimelineURL,
+            to: destination,
+            demuxAudio: false
+        ) { result in
             if case .failure(let e) = result { error = e }
             exp.fulfill()
         }

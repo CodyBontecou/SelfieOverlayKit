@@ -6,9 +6,9 @@ import UIKit
 /// Drives `RPScreenRecorder.startCapture(handler:)` and writes the resulting
 /// video (+ optional microphone audio) to a temp `.mov` via `AVAssetWriter`.
 ///
-/// The raw file is intentionally unprocessed — `CameraCompositor` consumes it
-/// alongside the camera recording and a `BubbleTimeline` to produce the final
-/// export.
+/// The raw file is intentionally unprocessed — `RawExporter` copies it out
+/// alongside the camera recording and the `BubbleTimeline` JSON for the host
+/// app (or the companion editor app) to consume.
 final class RawRecorder {
 
     enum RawError: Error {

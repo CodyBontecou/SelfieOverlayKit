@@ -121,19 +121,10 @@ public final class SelfieOverlayKit {
         recorder.start(withMicrophone: withMicrophone, completion: completion)
     }
 
-    /// Stops recording, persists a project folder with the raw screen / camera
-    /// tracks plus the bubble timeline, and presents the editor on top of
-    /// `presenter`. The completion fires with the `EditorProject` backing the
-    /// editor (or an error).
-    public func stopRecording(presenter: UIViewController,
-                              completion: ((Result<EditorProject, SelfieOverlayError>) -> Void)? = nil) {
-        recorder.stopAndPresentEditor(from: presenter, completion: completion)
-    }
-
     /// Stops recording and writes the raw tracks (screen.mov, camera.mov,
-    /// optionally a demuxed audio.m4a, and bubble.json) into `destination`,
-    /// skipping the in-app editor. Use this when the host app intends to do
-    /// its own editing in an external NLE.
+    /// optionally a demuxed audio.m4a, and bubble.json) into `destination`.
+    /// This is the SDK's only egress path — host apps consume the bundle
+    /// directly or hand it to the companion short-form editor app.
     ///
     /// `destination` must be a directory; it will be created if missing.
     /// Existing files at the four target paths are overwritten.
