@@ -22,7 +22,11 @@ final class TimelineView: UIView {
     // MARK: - Tunables
 
     var minPixelsPerSecond: CGFloat = 20
-    var maxPixelsPerSecond: CGFloat = 400
+    // 1600 px/s ≈ 53 px per frame at 30 fps — enough to land a razor cut
+    // on a single-frame "um" onset in an audio clip. Raised from the
+    // original 400 so timeline magnification can be used for precision
+    // editing, not just coarse trimming.
+    var maxPixelsPerSecond: CGFloat = 1600
 
     private(set) var pixelsPerSecond: CGFloat = 60 {
         didSet {
@@ -146,6 +150,41 @@ final class TimelineView: UIView {
         for row in trackRowViews.values {
             row.setSelectedClipID(id)
         }
+    }
+
+    /// Zoom the timeline so the currently selected clip fills the scroll
+    /// viewport minus `padding` (0..1 fraction) on each side, and scroll
+    /// horizontally so the clip is centred. No-op when nothing is selected.
+    /// Used by the "zoom to clip" toolbar button so the user can land razor
+    /// cuts without dragging the pinch gesture all the way to the ceiling.
+    func zoomToSelection(padding: CGFloat = 0.15) {
+        guard let id = selectedClipID else { return }
+        guard let loc = locate(clipID: id) else { return }
+        let clip = timeline.tracks[loc.trackIndex].clips[loc.clipIndex]
+        let duration = clip.timelineRange.duration.seconds
+        guard duration > 0, scrollView.bounds.width > 0 else { return }
+
+        let usable = scrollView.bounds.width * (1 - 2 * padding)
+        let target = min(max(usable / CGFloat(duration), minPixelsPerSecond),
+                         maxPixelsPerSecond)
+        pixelsPerSecond = target
+
+        layoutIfNeeded()
+        let clipStart = CGFloat(clip.timelineRange.start.seconds) * pixelsPerSecond
+        let clipEnd = CGFloat(clip.timelineRange.end.seconds) * pixelsPerSecond
+        let centre = (clipStart + clipEnd) / 2
+        let maxOffset = max(0, scrollView.contentSize.width - scrollView.bounds.width)
+        let newOffsetX = min(max(0, centre - scrollView.bounds.width / 2), maxOffset)
+        scrollView.setContentOffset(CGPoint(x: newOffsetX, y: 0), animated: true)
+    }
+
+    private func locate(clipID: UUID) -> (trackIndex: Int, clipIndex: Int)? {
+        for (ti, track) in timeline.tracks.enumerated() {
+            if let ci = track.clips.firstIndex(where: { $0.id == clipID }) {
+                return (ti, ci)
+            }
+        }
+        return nil
     }
 
     // MARK: - Layout

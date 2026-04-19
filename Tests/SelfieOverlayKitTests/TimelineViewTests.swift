@@ -139,4 +139,44 @@ final class TimelineViewTests: XCTestCase {
         view.setSelectedClipID(targetID)
         XCTAssertEqual(view.selectedClipID, targetID)
     }
+
+    func testZoomToSelectionFitsClipIntoViewport() {
+        let view = TimelineView(frame: CGRect(x: 0, y: 0, width: 400, height: 200))
+        let timeline = makeTimeline(clipDurations: [(0, 3), (3, 2), (5, 10)])
+        view.update(timeline: timeline)
+        view.layoutIfNeeded()
+
+        // Pick the 2-second middle clip. With 400px width and 15% padding
+        // per side, usable = 280px, target ≈ 140 px/s.
+        let targetID = timeline.tracks[0].clips[1].id
+        view.setSelectedClipID(targetID)
+        view.zoomToSelection(padding: 0.15)
+
+        let expected: CGFloat = 400 * (1 - 0.3) / 2
+        XCTAssertEqual(view.pixelsPerSecond, expected, accuracy: 1.0,
+                       "pixelsPerSecond should land ≈ 140 so the 2s clip fills ~70% of the viewport")
+    }
+
+    func testZoomToSelectionClampsToMaxCeiling() {
+        let view = TimelineView(frame: CGRect(x: 0, y: 0, width: 400, height: 200))
+        // A very short clip would want huge pixelsPerSecond; verify clamp.
+        let timeline = makeTimeline(clipDurations: [(0, 0.05)])
+        view.update(timeline: timeline)
+        view.layoutIfNeeded()
+
+        let targetID = timeline.tracks[0].clips[0].id
+        view.setSelectedClipID(targetID)
+        view.zoomToSelection()
+        XCTAssertEqual(view.pixelsPerSecond, view.maxPixelsPerSecond)
+    }
+
+    func testZoomToSelectionNoopWithoutSelection() {
+        let view = TimelineView(frame: CGRect(x: 0, y: 0, width: 400, height: 200))
+        let timeline = makeTimeline(clipDurations: [(0, 5)])
+        view.update(timeline: timeline)
+        view.layoutIfNeeded()
+        let before = view.pixelsPerSecond
+        view.zoomToSelection()
+        XCTAssertEqual(view.pixelsPerSecond, before)
+    }
 }

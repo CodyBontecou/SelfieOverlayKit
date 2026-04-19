@@ -32,6 +32,7 @@ public final class EditorViewController: UIViewController {
     let timeLabel = UILabel()
     let toolbarRow = UIStackView()
     let splitButton = UIButton(type: .system)
+    let zoomToClipButton = UIButton(type: .system)
     let timelineView = TimelineView()
     let inspector = ClipInspectorView()
 
@@ -192,6 +193,14 @@ public final class EditorViewController: UIViewController {
         splitButton.isEnabled = false
         toolbarRow.addArrangedSubview(splitButton)
 
+        zoomToClipButton.setImage(
+            UIImage(systemName: "arrow.up.left.and.arrow.down.right.square"), for: .normal)
+        zoomToClipButton.accessibilityLabel = "Zoom to selected clip"
+        zoomToClipButton.accessibilityIdentifier = "editor.zoomToClip"
+        zoomToClipButton.addTarget(self, action: #selector(didTapZoomToClip), for: .touchUpInside)
+        zoomToClipButton.isEnabled = false
+        toolbarRow.addArrangedSubview(zoomToClipButton)
+
         timelineView.translatesAutoresizingMaskIntoConstraints = false
         timelineView.layer.cornerRadius = 8
         timelineView.clipsToBounds = true
@@ -226,6 +235,12 @@ public final class EditorViewController: UIViewController {
         }
         inspector.onDuplicate = { [weak self] in
             self?.commitDuplicate()
+        }
+        inspector.onScaleCommit = { [weak self] scale in
+            self?.commitCanvasScale(CGFloat(scale))
+        }
+        inspector.onCameraShapeCommit = { [weak self] shape in
+            self?.commitCameraShape(shape)
         }
         view.addSubview(inspector)
 
@@ -596,6 +611,16 @@ public final class EditorViewController: UIViewController {
         editStore.apply(name: "Duplicate Clip") { $0.duplicating(clipID: clipID) }
     }
 
+    private func commitCanvasScale(_ scale: CGFloat) {
+        guard let clipID = timelineView.selectedClipID else { return }
+        editStore.apply(name: "Zoom") { $0.settingCanvasScale(clipID: clipID, scale) }
+    }
+
+    private func commitCameraShape(_ shape: CameraLayerShape?) {
+        guard let clipID = timelineView.selectedClipID else { return }
+        editStore.apply(name: "Shape") { $0.settingCameraShape(clipID: clipID, shape) }
+    }
+
     @objc func didTapSplit() {
         guard let clipID = timelineView.selectedClipID,
               let loc = editStore.timeline.locate(clipID: clipID) else { return }
@@ -706,6 +731,11 @@ public final class EditorViewController: UIViewController {
             canSplit = false
         }
         splitButton.isEnabled = canSplit
+        zoomToClipButton.isEnabled = timelineView.selectedClipID != nil
+    }
+
+    @objc private func didTapZoomToClip() {
+        timelineView.zoomToSelection()
     }
 
     @objc private func didTapPlayPause() {
