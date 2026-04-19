@@ -101,20 +101,45 @@ public final class BubbleVideoCompositor: NSObject, AVVideoCompositing {
                      height: CVPixelBufferGetHeight(dest))
             : instruction.outputSize
 
+        let (screenTransform, cameraTransform) = resolveTransforms(instruction: instruction)
+
         renderer.render(
             screen: screen,
             camera: camera,
             state: state,
             screenScale: instruction.screenScale,
             outputSize: outSize,
-            screenTransform: instruction.screenTransform,
-            cameraTransform: instruction.cameraTransform,
+            screenTransform: screenTransform,
+            cameraTransform: cameraTransform,
             cameraShapeOverride: instruction.cameraShapeOverride,
             backgroundColor: instruction.backgroundColor,
             into: dest,
             context: ciContext)
 
         request.finish(withComposedVideoFrame: dest)
+    }
+
+    /// Merge the instruction's baked per-layer transforms with any on-canvas
+    /// gesture overrides in `PreviewOverrideStore`. The store is consulted
+    /// per frame so a live pinch/pan animates smoothly without rebuilding
+    /// the composition on every tick.
+    private func resolveTransforms(instruction: BubbleCompositionInstruction)
+        -> (BubbleOverlayRenderer.LayerTransform,
+            BubbleOverlayRenderer.LayerTransform)
+    {
+        var screenTransform = instruction.screenTransform
+        var cameraTransform = instruction.cameraTransform
+        if let store = instruction.overrideStore {
+            if let id = instruction.screenClipID,
+               let override = store.transform(forClip: id) {
+                screenTransform = override
+            }
+            if let id = instruction.cameraClipID,
+               let override = store.transform(forClip: id) {
+                cameraTransform = override
+            }
+        }
+        return (screenTransform, cameraTransform)
     }
 
     private func bubbleState(

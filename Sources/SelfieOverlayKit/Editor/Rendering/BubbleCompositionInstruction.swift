@@ -27,6 +27,12 @@ public final class BubbleCompositionInstruction: NSObject, AVVideoCompositionIns
     let cameraTransform: BubbleOverlayRenderer.LayerTransform
     let cameraShapeOverride: CameraLayerShape?
     let backgroundColor: CIColor
+    /// Clip IDs this instruction was built from. Carried so the compositor
+    /// can look up on-canvas gesture overrides in `PreviewOverrideStore`
+    /// keyed by clip and prefer them over the baked transforms.
+    let screenClipID: UUID?
+    let cameraClipID: UUID?
+    let overrideStore: PreviewOverrideStore?
 
     init(timeRange: CMTimeRange,
          screenTrackID: CMPersistentTrackID,
@@ -39,7 +45,10 @@ public final class BubbleCompositionInstruction: NSObject, AVVideoCompositionIns
          screenTransform: BubbleOverlayRenderer.LayerTransform = .identity,
          cameraTransform: BubbleOverlayRenderer.LayerTransform = .identity,
          cameraShapeOverride: CameraLayerShape? = nil,
-         backgroundColor: CIColor = CIColor(red: 0, green: 0, blue: 0)) {
+         backgroundColor: CIColor = CIColor(red: 0, green: 0, blue: 0),
+         screenClipID: UUID? = nil,
+         cameraClipID: UUID? = nil,
+         overrideStore: PreviewOverrideStore? = nil) {
         self.timeRange = timeRange
         self.screenTrackID = screenTrackID
         self.cameraTrackID = cameraTrackID
@@ -52,6 +61,9 @@ public final class BubbleCompositionInstruction: NSObject, AVVideoCompositionIns
         self.cameraTransform = cameraTransform
         self.cameraShapeOverride = cameraShapeOverride
         self.backgroundColor = backgroundColor
+        self.screenClipID = screenClipID
+        self.cameraClipID = cameraClipID
+        self.overrideStore = overrideStore
         self.containsTweening = bubbleTimeline.map { !$0.snapshots.isEmpty } ?? false
 
         var trackIDs: [NSValue] = [NSNumber(value: screenTrackID)]

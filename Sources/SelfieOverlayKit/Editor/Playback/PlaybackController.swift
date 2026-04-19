@@ -26,6 +26,13 @@ public final class PlaybackController {
 
     public let player: AVPlayer
 
+    /// Side channel for on-canvas gestures. Writers (e.g. the preview
+    /// pinch/pan recognizers) drop a `LayerTransform` in here per clip and
+    /// the bubble compositor reads it each frame, overriding the baked
+    /// instruction transform without a composition rebuild. The store is
+    /// passed into `CompositionBuilder` so instructions carry a reference.
+    public let overrideStore = PreviewOverrideStore()
+
     @Published public private(set) var isPlaying: Bool = false
 
     public var currentTime: AnyPublisher<CMTime, Never> {
@@ -110,6 +117,19 @@ public final class PlaybackController {
         rebuildPlayerItem(preservingTime: player.currentTime())
     }
 
+    /// Nudge the current player item so the bubble compositor is asked for a
+    /// fresh frame. Called by on-canvas gestures while the user is dragging
+    /// and playback is paused — without this, the compositor only renders on
+    /// the next natural playback tick, so the preview image doesn't follow
+    /// the gesture until the user unpauses. A zero-tolerance seek to the
+    /// current time triggers one new render cycle without advancing the
+    /// playhead.
+    public func refreshCurrentFrame() {
+        guard !isPlaying else { return }
+        let now = player.currentTime()
+        player.seek(to: now, toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
     // MARK: - Rebuild pipeline
 
     private func scheduleRebuild() {
@@ -129,7 +149,8 @@ public final class PlaybackController {
                 timeline: editStore.timeline,
                 project: project,
                 bubbleTimeline: bubbleTimeline,
-                screenScale: screenScale)
+                screenScale: screenScale,
+                overrideStore: overrideStore)
         } catch {
             DebugLog.log("Playback", "composition build failed — \(error.localizedDescription)")
             return

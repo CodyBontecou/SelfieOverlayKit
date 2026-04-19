@@ -84,6 +84,20 @@ public final class EditorViewController: UIViewController {
         setupNavBar()
         setupLayout()
         previewCanvas.player = playback.player
+        previewCanvas.editStore = editStore
+        previewCanvas.playback = playback
+        previewCanvas.bubbleTimeline = bubbleTimeline
+        previewCanvas.screenScale = UIScreen.main.scale
+        previewCanvas.selectedClipIDProvider = { [weak self] in
+            self?.timelineView.selectedClipID
+        }
+        previewCanvas.onClipSelected = { [weak self] id in
+            guard let self else { return }
+            self.timelineView.setSelectedClipID(id)
+            self.updateSplitButtonEnabled()
+            self.updateInspector(for: id)
+            self.previewCanvas.refreshSelection()
+        }
         bindTimeLabel()
         bindTimeline()
         loadThumbnailsAndWaveforms()
@@ -94,6 +108,7 @@ public final class EditorViewController: UIViewController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] timeline in
                 self?.timelineView.update(timeline: timeline)
+                self?.previewCanvas.refreshSelection()
             }
             .store(in: &cancellables)
 
@@ -211,6 +226,7 @@ public final class EditorViewController: UIViewController {
         timelineView.onClipSelected = { [weak self] id in
             self?.updateSplitButtonEnabled()
             self?.updateInspector(for: id)
+            self?.previewCanvas.refreshSelection()
         }
         timelineView.onClipEdgeDrag = { [weak self] clipID, event in
             self?.handleEdgeDrag(clipID: clipID, event: event)

@@ -40,13 +40,15 @@ public enum CompositionBuilder {
     static func build(timeline: Timeline,
                       project: EditorProject,
                       bubbleTimeline: BubbleTimeline? = nil,
-                      screenScale: CGFloat = 1) throws -> Output {
+                      screenScale: CGFloat = 1,
+                      overrideStore: PreviewOverrideStore? = nil) throws -> Output {
         try build(
             timeline: timeline,
             screenAsset: AVURLAsset(url: project.screenURL),
             cameraAsset: AVURLAsset(url: project.cameraURL),
             bubbleTimeline: bubbleTimeline,
-            screenScale: screenScale)
+            screenScale: screenScale,
+            overrideStore: overrideStore)
     }
 
     /// Asset-level entry point. Exposed so tests can build compositions from
@@ -55,7 +57,8 @@ public enum CompositionBuilder {
                       screenAsset: AVAsset,
                       cameraAsset: AVAsset,
                       bubbleTimeline: BubbleTimeline? = nil,
-                      screenScale: CGFloat = 1) throws -> Output {
+                      screenScale: CGFloat = 1,
+                      overrideStore: PreviewOverrideStore? = nil) throws -> Output {
         let composition = AVMutableComposition()
 
         let sourceVideo: [SourceID: AVAssetTrack] = [
@@ -130,7 +133,8 @@ public enum CompositionBuilder {
             bubbleTimeline: bubbleTimeline,
             screenScale: screenScale,
             duration: timeline.duration,
-            preferredFrameRate: preferredFPS)
+            preferredFrameRate: preferredFPS,
+            overrideStore: overrideStore)
 
         let audioMix = AVMutableAudioMix()
         audioMix.inputParameters = audioMixParams
@@ -191,7 +195,8 @@ public enum CompositionBuilder {
         bubbleTimeline: BubbleTimeline?,
         screenScale: CGFloat,
         duration: CMTime,
-        preferredFrameRate: Float?
+        preferredFrameRate: Float?,
+        overrideStore: PreviewOverrideStore?
     ) -> AVMutableVideoComposition {
         let video = AVMutableVideoComposition()
         let fps = preferredFrameRate.map { Double($0) } ?? 30
@@ -230,7 +235,10 @@ public enum CompositionBuilder {
                 outputSize: renderSize,
                 screenTransform: .identity,
                 cameraTransform: cameraClip.map(layerTransform(from:)) ?? .identity,
-                cameraShapeOverride: cameraClip?.cameraShape))
+                cameraShapeOverride: cameraClip?.cameraShape,
+                screenClipID: nil,
+                cameraClipID: cameraClip?.id,
+                overrideStore: overrideStore))
         } else {
             for clip in screenClips {
                 // Camera clip that overlaps this screen-clip's time range.
@@ -253,7 +261,10 @@ public enum CompositionBuilder {
                     outputSize: renderSize,
                     screenTransform: layerTransform(from: clip),
                     cameraTransform: cameraClip.map(layerTransform(from:)) ?? .identity,
-                    cameraShapeOverride: cameraClip?.cameraShape))
+                    cameraShapeOverride: cameraClip?.cameraShape,
+                    screenClipID: clip.id,
+                    cameraClipID: cameraClip?.id,
+                    overrideStore: overrideStore))
             }
         }
         video.instructions = instructions
