@@ -284,9 +284,19 @@ final class OverlayController {
         hideConfigPanel()
 
         // Put the icons on the opposite side of whichever screen edge the
-        // bubble is closer to, so they stay fully on-screen.
-        let placement: BubbleActionRing.Placement =
-            bubble.center.x > root.view.bounds.midX ? .left : .right
+        // bubble is closer to, so they stay fully on-screen. When the bubble
+        // is so wide that neither horizontal side has room, fall back to
+        // stacking the icons above or below the bubble instead.
+        let rootBounds = root.view.bounds
+        let needed = BubbleActionRing.edgeGap + BubbleActionRing.iconSize
+        let leftRoom = bubble.frame.minX
+        let rightRoom = rootBounds.width - bubble.frame.maxX
+        let placement: BubbleActionRing.Placement
+        if max(leftRoom, rightRoom) >= needed {
+            placement = bubble.center.x > rootBounds.midX ? .left : .right
+        } else {
+            placement = bubble.center.y > rootBounds.midY ? .top : .bottom
+        }
 
         let state = BubbleActionRingState()
         let ring = BubbleActionRing(
