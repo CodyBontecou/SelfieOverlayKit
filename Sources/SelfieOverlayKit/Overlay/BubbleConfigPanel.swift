@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Compact inline config panel shown on the overlay when the bubble is tapped.
 /// Rendered inside the overlay window so it floats above host sheets alongside the bubble.
@@ -8,6 +9,14 @@ struct BubbleConfigPanel: View {
     @ObservedObject var recorder: RecordingController
     let onToggleRecording: () -> Void
     let onClose: () -> Void
+
+    /// Upper bound for the size slider. The pinch gesture is unbounded on the
+    /// high end — this just sets the slider's visible ceiling to the screen's
+    /// larger dimension so users can reach "fills the screen" from the slider.
+    private static var maxBubbleSize: Double {
+        let b = UIScreen.main.bounds
+        return Double(max(b.width, b.height))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -29,7 +38,7 @@ struct BubbleConfigPanel: View {
             slider(title: "Size",
                    value: Binding(get: { Double(settings.size) },
                                   set: { settings.size = CGFloat($0) }),
-                   range: 80...320,
+                   range: 80...Self.maxBubbleSize,
                    display: "\(Int(settings.size))pt")
 
             slider(title: "Border",

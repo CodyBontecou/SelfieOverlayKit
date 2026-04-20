@@ -272,8 +272,7 @@ final class BubbleView: UIView {
             onInteractionBegan?()
         case .changed:
             let proposed = pinchStartSize * gr.scale
-            let clamped = max(80, min(proposed, 320))
-            settings.size = clamped
+            settings.size = max(80, proposed)
         case .ended, .cancelled:
             if let superview {
                 let clamped = clampedCenter(center, in: superview.bounds)
@@ -301,8 +300,12 @@ final class BubbleView: UIView {
         let maxX = rect.maxX - half
         let minY = rect.minY + half + 20 // avoid status bar
         let maxY = rect.maxY - half - 20 // avoid home indicator
-        return CGPoint(x: min(max(proposed.x, minX), maxX),
-                       y: min(max(proposed.y, minY), maxY))
+        // When the bubble is larger than the available axis, the clamp inverts
+        // (minX > maxX). Fall back to centering on that axis so a zoomed-up
+        // bubble stays on screen instead of snapping to a corner.
+        let x = minX <= maxX ? min(max(proposed.x, minX), maxX) : rect.midX
+        let y = minY <= maxY ? min(max(proposed.y, minY), maxY) : rect.midY
+        return CGPoint(x: x, y: y)
     }
 
 }

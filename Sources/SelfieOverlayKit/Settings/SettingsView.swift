@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Built-in settings UI. Host apps can push/present this themselves, or use
 /// `SelfieOverlayKit.shared.presentSettings(from:)`.
@@ -9,6 +10,11 @@ public struct SelfieOverlaySettingsView: View {
 
     public init(settings: SettingsStore = SelfieOverlayKit.shared.settings) {
         self.settings = settings
+    }
+
+    private static var maxBubbleSize: Double {
+        let b = UIScreen.main.bounds
+        return Double(max(b.width, b.height))
     }
 
     public var body: some View {
@@ -48,7 +54,7 @@ public struct SelfieOverlaySettingsView: View {
                         Slider(value: Binding(
                             get: { Double(settings.size) },
                             set: { settings.size = CGFloat($0) }
-                        ), in: 80...320)
+                        ), in: 80...Self.maxBubbleSize)
                     }
                 }
 
