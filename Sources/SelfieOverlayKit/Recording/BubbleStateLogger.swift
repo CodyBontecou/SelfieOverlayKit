@@ -6,7 +6,7 @@ import QuartzCore
 /// values so they can be aligned to video PTS (same host clock) at stop time.
 final class BubbleStateLogger {
 
-    private weak var bubble: UIView?
+    private weak var bubble: BubbleView?
     private weak var settings: SettingsStore?
     private var displayLink: CADisplayLink?
 
@@ -21,7 +21,7 @@ final class BubbleStateLogger {
     }
     private var snapshots: [RawSnapshot] = []
 
-    func start(bubble: UIView, settings: SettingsStore) {
+    func start(bubble: BubbleView, settings: SettingsStore) {
         displayLink?.invalidate()
         displayLink = nil
         self.bubble = bubble
@@ -70,11 +70,13 @@ final class BubbleStateLogger {
 
     private func captureSnapshot() {
         guard let bubble, let settings else { return }
-        // bubble.frame is in its superview's coordinate space — the overlay window's
-        // root view, which covers the full screen. So this *is* screen-point space.
+        // recordingFrame is the bubble's "logical" frame in superview (screen-point)
+        // coordinates — equal to .frame normally, or the saved pre-stealth size at
+        // the current center while stealth is active so the baked bubble keeps the
+        // user's chosen size even when the live UI is a small stop affordance.
         snapshots.append(RawSnapshot(
             absoluteTime: CACurrentMediaTime(),
-            frame: bubble.frame,
+            frame: bubble.recordingFrame,
             shape: settings.shape,
             mirror: settings.mirror,
             opacity: settings.opacity,

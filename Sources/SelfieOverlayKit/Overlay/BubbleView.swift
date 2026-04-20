@@ -133,6 +133,21 @@ final class BubbleView: UIView {
         recordingIndicator.setActive(visible)
     }
 
+    /// The frame used by the recording compositor to bake the camera into the
+    /// final video. While stealth is active, the live view shrinks to a small
+    /// stop affordance — but the recording should keep the user's chosen
+    /// bubble size, just at the affordance's current center so dragging the
+    /// stealth indicator still repositions the baked bubble.
+    var recordingFrame: CGRect {
+        guard stealthActive else { return frame }
+        let size = savedBounds.size
+        return CGRect(
+            x: center.x - size.width / 2,
+            y: center.y - size.height / 2,
+            width: size.width,
+            height: size.height)
+    }
+
     private func observeSettings() {
         // @Published fires in willSet (before assignment). receive(on: RunLoop.main)
         // defers to the next runloop tick, at which point the store has been updated,

@@ -21,7 +21,7 @@ final class RecordingController: NSObject, ObservableObject {
 
     struct RecordingContext {
         let cameraSession: CameraSession
-        let bubble: UIView
+        let bubble: BubbleView
         let settings: SettingsStore
     }
 
