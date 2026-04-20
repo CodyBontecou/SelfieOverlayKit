@@ -8,12 +8,12 @@ final class BubbleActionRingState: ObservableObject {
     @Published var visible: Bool = false
 }
 
-/// Tiny side menu shown around the bubble on tap. Two buttons fly out from
+/// Tiny side menu shown around the bubble on tap. Three buttons fly out from
 /// the bubble center and stack along one axis: an X to turn the camera off,
-/// and a pencil to open the full config panel. The stack axis flips between
-/// vertical (left/right placement) and horizontal (top/bottom placement) so
-/// the icons stay on-screen even when the bubble is sized up to fill the
-/// screen width.
+/// a pencil to open the full config panel, and a record dot to immediately
+/// start recording. The stack axis flips between vertical (left/right
+/// placement) and horizontal (top/bottom placement) so the icons stay
+/// on-screen even when the bubble is sized up to fill the screen width.
 struct BubbleActionRing: View {
 
     enum Placement {
@@ -43,27 +43,24 @@ struct BubbleActionRing: View {
     }
 
     /// Centers (in container-local coordinates) where the icons land after
-    /// animating in. Order is [xmark, pencil] — for left/right placement
-    /// xmark sits above pencil; for top/bottom placement xmark sits to the
-    /// left of pencil. The controller uses these to mask hit-testing so taps
-    /// outside the icons fall through to the bubble or dismiss catcher.
+    /// animating in. Order is [xmark, pencil, record]. Icons stack evenly
+    /// spaced along the axis; for left/right placement xmark sits at the
+    /// top and record at the bottom, for top/bottom placement xmark sits
+    /// at the leading edge and record at the trailing edge. The controller
+    /// uses these to mask hit-testing so taps outside the icons fall through
+    /// to the bubble or dismiss catcher.
     static func iconCenters(bubbleSize: CGFloat, placement: Placement) -> [CGPoint] {
         let side = containerSize(bubbleSize: bubbleSize)
         let center = CGPoint(x: side / 2, y: side / 2)
         let primary = bubbleSize / 2 + edgeGap + iconSize / 2
+        let offsets: [CGFloat] = [-2 * stackOffset, 0, 2 * stackOffset]
         switch placement {
         case .left, .right:
             let dx = primary * (placement == .right ? 1 : -1)
-            return [
-                CGPoint(x: center.x + dx, y: center.y - stackOffset),
-                CGPoint(x: center.x + dx, y: center.y + stackOffset),
-            ]
+            return offsets.map { CGPoint(x: center.x + dx, y: center.y + $0) }
         case .top, .bottom:
             let dy = primary * (placement == .bottom ? 1 : -1)
-            return [
-                CGPoint(x: center.x - stackOffset, y: center.y + dy),
-                CGPoint(x: center.x + stackOffset, y: center.y + dy),
-            ]
+            return offsets.map { CGPoint(x: center.x + $0, y: center.y + dy) }
         }
     }
 
@@ -72,6 +69,7 @@ struct BubbleActionRing: View {
     let placement: Placement
     let onClose: () -> Void
     let onEdit: () -> Void
+    let onRecord: () -> Void
 
     private var side: CGFloat {
         Self.containerSize(bubbleSize: bubbleSize)
@@ -91,6 +89,11 @@ struct BubbleActionRing: View {
                       target: centers[1],
                       bubbleCenter: bubbleCenter,
                       action: onEdit)
+            satellite(systemName: "record.circle",
+                      tint: .red,
+                      target: centers[2],
+                      bubbleCenter: bubbleCenter,
+                      action: onRecord)
         }
         .frame(width: side, height: side)
         .animation(.spring(response: 0.34, dampingFraction: 0.66), value: state.visible)

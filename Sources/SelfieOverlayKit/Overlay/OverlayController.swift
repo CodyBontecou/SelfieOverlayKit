@@ -308,6 +308,11 @@ final class OverlayController {
                 guard let self else { return }
                 self.hideActionRing()
                 self.showConfigPanel()
+            },
+            onRecord: { [weak self] in
+                guard let self else { return }
+                self.hideActionRing()
+                self.recorder?.start(withMicrophone: true, completion: nil)
             }
         )
         let host = UIHostingController(rootView: ring)
