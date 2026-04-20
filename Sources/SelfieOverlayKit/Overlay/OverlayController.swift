@@ -283,11 +283,10 @@ final class OverlayController {
         // Dismiss the panel if it happened to be open via some other path.
         hideConfigPanel()
 
-        let placement: BubbleActionRing.Placement = {
-            let topGap = bubble.frame.minY - root.view.safeAreaInsets.top
-            let neededAbove = BubbleActionRing.iconSize + BubbleActionRing.edgeGap + 8
-            return topGap < neededAbove ? .bottom : .top
-        }()
+        // Put the icons on the opposite side of whichever screen edge the
+        // bubble is closer to, so they stay fully on-screen.
+        let placement: BubbleActionRing.Placement =
+            bubble.center.x > root.view.bounds.midX ? .left : .right
 
         let state = BubbleActionRingState()
         let ring = BubbleActionRing(

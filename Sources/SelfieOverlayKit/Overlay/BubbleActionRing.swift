@@ -8,46 +8,42 @@ final class BubbleActionRingState: ObservableObject {
     @Published var visible: Bool = false
 }
 
-/// Tiny radial menu shown around the bubble on tap. Two satellite buttons fly out
-/// from the bubble center: an X to turn the camera off and a pencil to open the
-/// full config panel.
+/// Tiny side menu shown around the bubble on tap. Two buttons fly out
+/// horizontally from the bubble center and stack vertically: an X to turn the
+/// camera off, and a pencil to open the full config panel.
 struct BubbleActionRing: View {
 
     enum Placement {
-        /// Icons sit on the upper arc — used when the bubble has room above it.
-        case top
-        /// Icons sit on the lower arc — used when the bubble is near the top edge.
-        case bottom
+        /// Icons stack on the left side of the bubble — used when the bubble
+        /// is near the right edge of the screen.
+        case left
+        /// Icons stack on the right side of the bubble — used when the bubble
+        /// is near the left edge of the screen.
+        case right
     }
 
     static let iconSize: CGFloat = 36
     static let edgeGap: CGFloat = 14
+    /// Vertical offset from bubble center for each stacked icon.
+    static let stackOffset: CGFloat = iconSize / 2 + 4
 
     /// Total width/height of the square that houses the bubble plus the satellites.
     static func containerSize(bubbleSize: CGFloat) -> CGFloat {
         bubbleSize + 2 * (edgeGap + iconSize)
     }
 
-    /// Centers (in container-local coordinates) where the satellite icons land
-    /// after animating in. The controller uses these to mask hit-testing so taps
-    /// outside the icons fall through to the bubble or dismiss catcher.
+    /// Centers (in container-local coordinates) where the icons land after
+    /// animating in. Order is [xmark, pencil] — xmark above, pencil below.
+    /// The controller uses these to mask hit-testing so taps outside the
+    /// icons fall through to the bubble or dismiss catcher.
     static func iconCenters(bubbleSize: CGFloat, placement: Placement) -> [CGPoint] {
-        let radius = bubbleSize / 2 + edgeGap + iconSize / 2
         let side = containerSize(bubbleSize: bubbleSize)
         let center = CGPoint(x: side / 2, y: side / 2)
-        return angles(for: placement).map { degrees in
-            let radians = degrees * .pi / 180
-            let dx = CGFloat(Double(radius) * cos(radians))
-            let dy = CGFloat(Double(radius) * sin(radians))
-            return CGPoint(x: center.x + dx, y: center.y + dy)
-        }
-    }
-
-    private static func angles(for placement: Placement) -> [Double] {
-        switch placement {
-        case .top:    return [-135, -45]   // upper-left (X), upper-right (pencil)
-        case .bottom: return [135, 45]
-        }
+        let dx = (bubbleSize / 2 + edgeGap + iconSize / 2) * (placement == .right ? 1 : -1)
+        return [
+            CGPoint(x: center.x + dx, y: center.y - stackOffset),
+            CGPoint(x: center.x + dx, y: center.y + stackOffset),
+        ]
     }
 
     @ObservedObject var state: BubbleActionRingState
@@ -56,24 +52,23 @@ struct BubbleActionRing: View {
     let onClose: () -> Void
     let onEdit: () -> Void
 
-    private var radius: CGFloat {
-        bubbleSize / 2 + Self.edgeGap + Self.iconSize / 2
-    }
-
     private var side: CGFloat {
         Self.containerSize(bubbleSize: bubbleSize)
     }
 
     var body: some View {
-        let angles = Self.angles(for: placement)
+        let centers = Self.iconCenters(bubbleSize: bubbleSize, placement: placement)
+        let bubbleCenter = CGPoint(x: side / 2, y: side / 2)
         ZStack {
             satellite(systemName: "xmark",
                       tint: .red,
-                      angleDegrees: angles[0],
+                      target: centers[0],
+                      bubbleCenter: bubbleCenter,
                       action: onClose)
             satellite(systemName: "pencil",
-                      tint: .accentColor,
-                      angleDegrees: angles[1],
+                      tint: .primary,
+                      target: centers[1],
+                      bubbleCenter: bubbleCenter,
                       action: onEdit)
         }
         .frame(width: side, height: side)
@@ -82,12 +77,12 @@ struct BubbleActionRing: View {
 
     private func satellite(systemName: String,
                            tint: Color,
-                           angleDegrees: Double,
+                           target: CGPoint,
+                           bubbleCenter: CGPoint,
                            action: @escaping () -> Void) -> some View {
-        let radians = angleDegrees * .pi / 180
-        let r: Double = state.visible ? Double(radius) : 0
-        let offset = CGSize(width: CGFloat(r * cos(radians)),
-                            height: CGFloat(r * sin(radians)))
+        let fullOffset = CGSize(width: target.x - bubbleCenter.x,
+                                height: target.y - bubbleCenter.y)
+        let offset = state.visible ? fullOffset : .zero
 
         return Button(action: action) {
             Image(systemName: systemName)
