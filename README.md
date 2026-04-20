@@ -42,7 +42,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/CodyBontecou/SelfieOverlayKit.git", from: "0.7.0")
+    .package(url: "https://github.com/CodyBontecou/SelfieOverlayKit.git", from: "0.8.0")
 ]
 ```
 
