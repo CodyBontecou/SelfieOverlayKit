@@ -260,7 +260,6 @@ final class BubbleView: UIView {
                                    in: superview.bounds)
         case .ended, .cancelled:
             settings.position = frame.origin
-            snapToEdgeIfNear(in: superview.bounds)
         default:
             break
         }
@@ -306,22 +305,4 @@ final class BubbleView: UIView {
                        y: min(max(proposed.y, minY), maxY))
     }
 
-    private func snapToEdgeIfNear(in rect: CGRect) {
-        let margin: CGFloat = 16
-        var target = center
-        let distanceLeft = center.x - rect.minX
-        let distanceRight = rect.maxX - center.x
-        if min(distanceLeft, distanceRight) < bounds.width {
-            target.x = distanceLeft < distanceRight
-                ? rect.minX + bounds.width / 2 + margin
-                : rect.maxX - bounds.width / 2 - margin
-        }
-        UIView.animate(withDuration: 0.25,
-                       delay: 0,
-                       usingSpringWithDamping: 0.8,
-                       initialSpringVelocity: 0.5,
-                       options: [.allowUserInteraction],
-                       animations: { self.center = target },
-                       completion: { _ in self.settings.position = self.frame.origin })
-    }
 }
