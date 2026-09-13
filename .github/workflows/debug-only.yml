@@ -1,0 +1,38 @@
+name: Regenerate debug-only branch
+
+# Keeps the `debug-only` branch in sync with main: every Swift source on that
+# branch is wrapped in `#if DEBUG` so the package compiles to an empty library
+# in Release builds of consuming apps. Apps that want the overlay as a dev-only
+# tool pin this branch instead of a version tag.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Inject debug-only guards
+        run: bash scripts/make-debug-only.sh
+
+      - name: Publish debug-only branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B debug-only
+          git add -A
+          if git diff --cached --quiet; then
+            echo "debug-only branch already up to date"
+            exit 0
+          fi
+          git commit -m "Regenerate debug-only branch from ${GITHUB_SHA}"
+          git push origin debug-only --force
