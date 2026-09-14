@@ -2,6 +2,27 @@
 
 Status: exploration (no implementation yet). Written against `debug-only` @ `00631ce`.
 
+## 0. Decision gate: do you even need an Android SDK?
+
+Android has **no in-app POV capture primitive** — `MediaProjection` is the only door to screen
+pixels and structurally requires a per-recording consent dialog, a foreground service with a
+persistent notification, and runtime permissions. iOS-style seamless summon-and-record is
+**not achievable** in-app on Android regardless of how much code you write.
+
+| Need | Answer |
+|---|---|
+| Demo/marketing/QA videos of your own app, recorded by you | **scrcpy × 2 + OBS, zero app code.** scrcpy 2.x mirrors the front camera as its own source (`--video-source=camera`, Android 12+) alongside the display mirror, each recordable to file or composited live in OBS (circle mask, mirror, position = OBS layer, set once). Runs on adb shell privileges → no consent dialog, no FGS notification, works on release builds from Play. ~0 days. |
+| Quick bug-repro recordings | Android 11+ system quick-settings recorder (global capture, baked overlay, no separate tracks — fine for repro, wrong for demos). |
+| One-tap **on-device** capture by QA or users, no desktop | The in-app module this doc describes. |
+
+For health-md (debug-only integration, developer-recorded demos) the recommendation is
+**external-first**: document the scrcpy+OBS workflow; build the module only if deskless capture
+becomes a real requirement. If it does, Android's constraints *shrink* scope: the screen track
+records the bubble natively (§3.2), so recording is always stealth → bubble position is static →
+the timeline degenerates to a single snapshot → no Choreographer logger, and the Compose overlay
+shrinks to a minimal pre-recording positioner. Realistically ~7–9 focused days, not the 12–14
+estimated in §6 for full parity.
+
 ## TL;DR
 
 - The SDK is ~3,800 lines of Swift whose weight is **UI + platform capture code** (<10% is shareable pure logic). A literal "one codebase, two platforms" (KMP or Rust core) buys very little today and adds build-system coupling.
@@ -9,6 +30,7 @@ Status: exploration (no implementation yet). Written against `debug-only` @ `006
 - The companion editor then consumes exports from either platform unchanged — that's the payoff that matters.
 - Android port is ~2–3 weeks of focused work for parity minus `FinalCompositor` (defer; editor already owns compositing).
 - Two divergences cannot be papered over and must shape the unified API: **MediaProjection's consent dialog + foreground service**, and the fact that **Android's screen capture records the bubble** (iOS's misses it), so Android must always stealth-hide during recording.
+- See §0 before committing to any of this — for developer-recorded demos, scrcpy + OBS may obviate the port entirely.
 
 ---
 
